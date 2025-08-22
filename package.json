@@ -17,6 +17,7 @@
     "@capacitor-community/keep-awake": "^7.1.0",
     "@capacitor/android": "^7.4.3",
     "@capacitor/core": "^7.4.3",
+    "@capacitor/device": "^7.0.2",
     "@capacitor/status-bar": "^7.0.2",
     "@mdi/font": "^7.4.47",
     "vue": "^3.5.18",

@@ -1,0 +1,8 @@
+{
+  "plugins": {
+    "StatusBar": {
+      "backgroundColor": "#FFFFFF",
+      "style": "DARK"
+    }
+  }
+}
