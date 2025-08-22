@@ -1,25 +1,19 @@
 <template>
   <v-app>
-    <v-app-bar density="comfortable" flat>
+    <!-- <v-app-bar density="comfortable" flat>
       <v-app-bar-title></v-app-bar-title>
       <v-spacer />
       <v-btn icon="mdi-plus" @click="openDialogForNew" :disabled="isPlaying" :title="'Aggiungi canzone'" />
-    </v-app-bar>
+    </v-app-bar> -->
 
     <v-main>
-      <v-container class="py-6" fluid>
-        <v-row class="g-6" align="stretch">
-          <!-- Lista canzoni -->
-          <v-col cols="12" md="6" lg="5">
-            <v-card class="h-100" elevation="2">
-              <v-card-title class="text-subtitle-1">Lista</v-card-title>
-              <v-divider />
-              <v-card-text class="pa-0">
+      <v-container class="pa-0 ma-0" fluid style="max-width: 100vw;">
                 <v-list lines="two" density="comfortable">
                   <v-list-item
                     v-for="(song, index) in songs"
                     :key="song.id"
                     :active="selected?.id === song.id"
+                    :class="{ 'selected-song': selected?.id === song.id }"
                     @click="selectSong(song)"
                   >
                     <!-- <template #prepend>
@@ -85,68 +79,10 @@
                 <template v-if="!songs.length">
                   <div class="pa-6 text-medium-emphasis">Nessuna canzone. Clicca “+” per aggiungerne una.</div>
                 </template>
-              </v-card-text>
               <v-divider />
               <v-card-actions>
                 <v-btn block prepend-icon="mdi-plus" @click="openDialogForNew" :disabled="isPlaying">Aggiungi</v-btn>
               </v-card-actions>
-            </v-card>
-          </v-col>
-
-          <!-- Metronomo -->
-          <v-col cols="12" md="6" lg="7">
-            <v-card class="h-100 d-flex flex-column" elevation="2">
-              <v-card-title class="d-flex align-center justify-space-between">
-                <div class="text-subtitle-1">Metronomo</div>
-                <div class="text-medium-emphasis" v-if="selected">
-                  {{ selected.title }} — {{ bpm }} BPM • {{ beats }}/{{ noteValue }}
-                </div>
-              </v-card-title>
-              <v-divider />
-
-              <v-card-text class="flex-grow-1">
-                <v-row class="mt-2" align="center" justify="center">
-                  <v-col cols="12" md="4">
-                    <v-text-field type="number" label="BPM" v-model.number="bpm" :min="20" :max="300" :disabled="isPlaying" hide-details />
-                  </v-col>
-                  <v-col cols="6" md="4">
-                    <v-text-field type="number" label="Beats (sopra)" v-model.number="beats" :min="1" :max="12" :disabled="isPlaying" hide-details />
-                  </v-col>
-                  <v-col cols="6" md="4">
-                    <v-select :items="noteItems" item-title="label" item-value="value" label="Nota (sotto)" v-model="noteValue" :disabled="isPlaying" hide-details />
-                  </v-col>
-                </v-row>
-
-                <!-- Indicatore battute -->
-                <div class="d-flex justify-center align-center mt-6 flex-wrap" style="gap: 12px; min-height: 56px;">
-                  <div
-                    v-for="n in beats"
-                    :key="n"
-                    class="beat-dot"
-                    :class="{
-                      active: isPlaying && (currentBeat === n - 1),
-                      accent: (n === 1)
-                    }"
-                  />
-                </div>
-
-                <div class="text-center mt-6">
-                  <div class="display-2 font-weight-bold">{{ Math.round(currentBpm) }}</div>
-                  <div class="text-medium-emphasis">BPM effettivi</div>
-                </div>
-              </v-card-text>
-
-              <v-divider />
-              <v-card-actions class="d-flex flex-wrap" style="gap: 8px;">
-                <v-btn :prepend-icon="isPlaying ? 'mdi-stop' : 'mdi-play'" 
-                @click="toggle" color="primary">{{ isPlaying ? 'Stop' : 'Start' }}</v-btn>
-                <v-btn prepend-icon="mdi-content-save" @click="saveEdits" :disabled="!selected || isPlaying">Salva modifiche canzone</v-btn>
-                <v-spacer />
-                <v-switch inset v-model="accentFirst" :disabled="isPlaying" label="Accentua primo battito" />
-              </v-card-actions>
-            </v-card>
-          </v-col>
-        </v-row>
       </v-container>
     </v-main>
 
@@ -183,7 +119,7 @@
       </v-card>
     </v-dialog>
 <!-- Pannello fisso inferiore: metronomo & editor -->
-<v-footer app elevation="8" class="fixed-panel">
+<v-footer app elevation="15" class="fixed-panel">
   <div class="w-100">
     <!-- Riga compatta -->
     <div class="d-flex align-center justify-space-between flex-wrap gap-2 px-3 py-2">
@@ -198,20 +134,46 @@
           <v-btn
             :icon="isPlaying ? 'mdi-stop' : 'mdi-play'"
             density="default"
-            color="primary"
+            :color="isPlaying ? 'error' : 'success'"
             @click="toggle"
             class="mx-auto"
           />
         </div>
       </div>
 
+      <v-row class="w-100" align="center" no-gutters>
+        <v-col cols="6" class="d-flex align-center">
+          <v-switch
+        v-model="accentFirst"
+        :disabled="isPlaying"
+        prepend-icon="mdi-music-circle"
+        class="ma-0 pa-0"
+          />
+        </v-col>
+        <v-col cols="6" class="d-flex justify-end align-center">
+          <v-btn icon variant="text" @click="panelOpen = !panelOpen">
+        <v-icon>{{ panelOpen ? 'mdi-chevron-down' : 'mdi-chevron-up' }}</v-icon>
+          </v-btn>
+        </v-col>
+        <!-- Indicatore battute -->
+        <v-col cols="12" class="d-flex justify-center align-center">
+          <div
+            class="d-flex justify-center align-center flex-wrap w-100"
+            style="gap: 12px; min-height: 20px;"
+          >
+            <div
+              v-for="n in beats"
+              :key="n"
+              class="beat-dot"
+              :class="{
+                active: isPlaying && (currentBeat === n - 1),
+                accent: (n === 1)
+              }"
+            />
+          </div>
+        </v-col>
 
-      <div class="d-flex align-center gap-2">
-        <v-switch inset v-model="accentFirst" hide-details density="comfortable" :disabled="isPlaying" :label="'Accentua 1'" />
-        <v-btn icon variant="text" @click="panelOpen = !panelOpen">
-          <v-icon>{{ panelOpen ? 'mdi-chevron-down' : 'mdi-chevron-up' }}</v-icon>
-        </v-btn>
-      </div>
+      </v-row>
     </div>
 
     <!-- Editor espandibile -->
@@ -232,8 +194,6 @@
             <v-btn block prepend-icon="mdi-content-save" :disabled="!selected || isPlaying" @click="saveEdits">Salva</v-btn>
           </v-col>
         </v-row>
-
-        <!-- Indicatore battute -->
       </div>
     </v-expand-transition>
   </div>
@@ -272,7 +232,7 @@ const accentFirst = ref(true)
 const isPlaying = ref(false)
 const currentBeat = ref(0) // 0-based
 const currentBpm = ref(bpm.value)
-
+const panelOpen = ref(false)
 // AudioContext e scheduling
 let audioCtx = null
 let nextNoteTime = 0 // quando suonerà la prossima nota (in AudioContext time)
@@ -322,7 +282,7 @@ function playClick(accent = false, when = 0) {
   osc.connect(gain).connect(audioCtx.destination)
   osc.start(when)
   gain.gain.setValueAtTime(0.0001, when)
-  gain.gain.exponentialRampToValueAtTime(0.4, when + 0.001)
+  gain.gain.exponentialRampToValueAtTime(0.8, when + 0.001)
   gain.gain.exponentialRampToValueAtTime(0.0001, when + 0.03)
   osc.stop(when + 0.05)
 }
@@ -504,5 +464,8 @@ function doRemove() {
 }
 .beat-dot.accent {
   border-width: 3px;
+}
+.selected-song {
+  background-color: rgba(20,180,180,0.05) !important;
 }
 </style>
