@@ -12,7 +12,7 @@
           <!-- Lista canzoni -->
           <v-col cols="12" md="6" lg="5">
             <v-card class="h-100" elevation="2">
-              <v-card-title class="text-subtitle-1">Canzoni</v-card-title>
+              <v-card-title class="text-subtitle-1">Lista</v-card-title>
               <v-divider />
               <v-card-text class="pa-0">
                 <v-list lines="two" density="comfortable">
@@ -22,21 +22,64 @@
                     :active="selected?.id === song.id"
                     @click="selectSong(song)"
                   >
-                    <template #prepend>
+                    <!-- <template #prepend>
                       <v-avatar size="32">
                         <v-icon>mdi-music</v-icon>
                       </v-avatar>
-                    </template>
+                    </template> -->
                     <v-list-item-title class="font-medium">{{ song.title }}</v-list-item-title>
                     <v-list-item-subtitle>
                       {{ song.bpm }} BPM • {{ song.beats }}/{{ song.noteValue }}
                     </v-list-item-subtitle>
                     <template #append>
-                      <v-btn :disabled="isPlaying || index===0" icon="mdi-arrow-up" variant="text" class="mr-1" @click.stop="moveUp(index)" />
-                      <v-btn :disabled="isPlaying || index===songs.length-1" icon="mdi-arrow-down" variant="text" class="mr-1" @click.stop="moveDown(index)" />
-                      <v-btn icon="mdi-pencil" variant="text" @click.stop="openDialogForEdit(song)" />
-                      <v-btn icon="mdi-delete" variant="text" color="error" @click.stop="confirmRemove(song.id)" />
+                      <div class="d-flex align-center">
+                        <!-- Se questa riga è espansa, mostra i pulsanti -->
+                        <template v-if="expandedRowId === song.id">
+                          <v-btn
+                            :disabled="isPlaying || index===0"
+                            icon="mdi-arrow-up"
+                            variant="text"
+                            class="mr-1"
+                            @click.stop="moveUp(index)"
+                          />
+                          <v-btn
+                            :disabled="isPlaying || index===songs.length-1"
+                            icon="mdi-arrow-down"
+                            variant="text"
+                            class="mr-1"
+                            @click.stop="moveDown(index)"
+                          />
+                          <v-btn
+                            icon="mdi-pencil"
+                            variant="text"
+                            @click.stop="openDialogForEdit(song)"
+                          />
+                          <v-btn
+                            icon="mdi-delete"
+                            variant="text"
+                            color="error"
+                            @click.stop="confirmRemove(song.id)"
+                          />
+                          <!-- pulsante per richiudere -->
+                          <v-btn
+                            icon="mdi-close"
+                            variant="text"
+                            class="ml-1"
+                            @click.stop="expandedRowId = null"
+                          />
+                        </template>
+
+                        <!-- Altrimenti mostra solo i tre puntini -->
+                        <v-btn
+                          v-else
+                          icon="mdi-dots-vertical"
+                          variant="text"
+                          @click.stop="expandedRowId = song.id"
+                        />
+                      </div>
                     </template>
+
+
                   </v-list-item>
                 </v-list>
                 <template v-if="!songs.length">
@@ -95,7 +138,8 @@
 
               <v-divider />
               <v-card-actions class="d-flex flex-wrap" style="gap: 8px;">
-                <v-btn :prepend-icon="isPlaying ? 'mdi-stop' : 'mdi-play'" @click="toggle" color="primary">{{ isPlaying ? 'Stop' : 'Start' }}</v-btn>
+                <v-btn :prepend-icon="isPlaying ? 'mdi-stop' : 'mdi-play'" 
+                @click="toggle" color="primary">{{ isPlaying ? 'Stop' : 'Start' }}</v-btn>
                 <v-btn prepend-icon="mdi-content-save" @click="saveEdits" :disabled="!selected || isPlaying">Salva modifiche canzone</v-btn>
                 <v-spacer />
                 <v-switch inset v-model="accentFirst" :disabled="isPlaying" label="Accentua primo battito" />
@@ -138,6 +182,64 @@
         </v-card-actions>
       </v-card>
     </v-dialog>
+<!-- Pannello fisso inferiore: metronomo & editor -->
+<v-footer app elevation="8" class="fixed-panel">
+  <div class="w-100">
+    <!-- Riga compatta -->
+    <div class="d-flex align-center justify-space-between flex-wrap gap-2 px-3 py-2">
+      <div class="d-flex align-center gap-3 w-100">
+        <v-icon class="mr-1">mdi-timer</v-icon>
+        <div>
+          <div class="text-subtitle-2" v-if="selected">{{ selected.title }}</div>
+          <div class="text-medium-emphasis">{{ Math.round(currentBpm) }} BPM</div>
+        </div>
+        <v-spacer />
+        <div class="d-flex align-center justify-center" style="min-width:48px;">
+          <v-btn
+            :icon="isPlaying ? 'mdi-stop' : 'mdi-play'"
+            density="default"
+            color="primary"
+            @click="toggle"
+            class="mx-auto"
+          />
+        </div>
+      </div>
+
+
+      <div class="d-flex align-center gap-2">
+        <v-switch inset v-model="accentFirst" hide-details density="comfortable" :disabled="isPlaying" :label="'Accentua 1'" />
+        <v-btn icon variant="text" @click="panelOpen = !panelOpen">
+          <v-icon>{{ panelOpen ? 'mdi-chevron-down' : 'mdi-chevron-up' }}</v-icon>
+        </v-btn>
+      </div>
+    </div>
+
+    <!-- Editor espandibile -->
+    <v-expand-transition>
+      <div v-show="panelOpen" class="px-3 pb-3">
+        <v-divider class="mb-3" />
+        <v-row class="mt-1" align="center" justify="center">
+          <v-col cols="12" md="3">
+            <v-text-field type="number" label="BPM" v-model.number="bpm" :min="20" :max="300" :disabled="isPlaying" hide-details />
+          </v-col>
+          <v-col cols="6" md="3">
+            <v-text-field type="number" label="Beats (sopra)" v-model.number="beats" :min="1" :max="12" :disabled="isPlaying" hide-details />
+          </v-col>
+          <v-col cols="6" md="3">
+            <v-select :items="noteItems" item-title="label" item-value="value" label="Nota (sotto)" v-model="noteValue" :disabled="isPlaying" hide-details />
+          </v-col>
+          <v-col cols="12" md="3" class="d-flex align-center">
+            <v-btn block prepend-icon="mdi-content-save" :disabled="!selected || isPlaying" @click="saveEdits">Salva</v-btn>
+          </v-col>
+        </v-row>
+
+        <!-- Indicatore battute -->
+      </div>
+    </v-expand-transition>
+  </div>
+</v-footer>
+
+
   </v-app>
 </template>
 
@@ -148,6 +250,7 @@ import { StatusBar, Style } from '@capacitor/status-bar'
 
 // Helpers
 const ensureId = (s) => ({ ...s, id: s?.id ?? (crypto?.randomUUID ? crypto.randomUUID() : String(Date.now() + Math.random())) })
+const expandedRowId = ref(null)
 
 // --- Persistenza semplice con localStorage ---
 const STORAGE_KEY = 'metronome_songs_v1'
