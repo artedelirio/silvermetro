@@ -1,10 +1,10 @@
 <template>
   <v-app>
-    <!-- <v-app-bar density="comfortable" flat>
+    <v-app-bar density="comfortable" flat>
       <v-app-bar-title></v-app-bar-title>
       <v-spacer />
       <v-btn icon="mdi-plus" @click="openDialogForNew" :disabled="isPlaying" :title="'Aggiungi canzone'" />
-    </v-app-bar> -->
+    </v-app-bar>
 
     <v-main>
       <v-container class="pa-0 ma-0" fluid style="max-width: 100vw;">
