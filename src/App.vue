@@ -194,14 +194,14 @@
 			</div>
 			<v-spacer />
 			<div class="d-flex align-center justify-center" style="min-width:120px; gap:4px;">
-			  <v-btn
+			  <!-- <v-btn
 				:disabled="!selected || songs.length <= 1 || (selected && songs[0]?.id === selected.id)"
 				icon="mdi-skip-previous"
 				density="default"
 				variant="text"
 				@click="onPrevClick"
 				title="Brano precedente"
-			  />
+			  /> -->
 			  <v-btn
 				:icon="isPlaying ? 'mdi-stop' : 'mdi-play'"
 				density="default"
@@ -210,14 +210,14 @@
 				class="mx-auto"
 				title="Play/Stop"
 			  />
-			  <v-btn
+			  <!-- <v-btn
 				:disabled="!selected || songs.length <= 1 || (selected && songs[songs.length-1]?.id === selected.id)"
 				icon="mdi-skip-next"
 				density="default"
 				variant="text"
 				@click="onNextClick"
 				title="Brano successivo"
-			  />
+			  /> -->
 			</div>
 		  </div>
 
@@ -289,20 +289,21 @@
         @click="goNextSong"
       />
     </v-toolbar>
-    <v-slider
-        v-model.number="form.scrollSpeed"
+    <div v-if="selected" class="px-4 pt-4 pb-1">
+      <v-slider
+        v-model.number="scrollSpeedModel"
         :min="0"
         :max="300"
         :step="5"
-        show-ticks
         thumb-label="always"
         label="Velocità scorrimento (px/s)"
       />
-      <div class="text-caption text-medium-emphasis">
-        {{ form.scrollSpeed }} px/s — 0 = disattivato
+      <div class="text-caption text-medium-emphasis text-center">
+        {{ Math.round(scrollSpeedModel) }} px/s — 0 = disattivato
       </div>
+    </div>
     <v-card-text class="pa-3">
-      <div class="lyrics-fullscreen">
+      <div class="lyrics-fullscreen" ref="lyricsFullscreenEl">
         <pre class="lyrics-pre">{{ selected?.lyrics || '— Nessun testo —' }}</pre>
       </div>
     </v-card-text>
@@ -322,6 +323,8 @@ import { initializeApp, getApps } from 'firebase/app'
 import { getFirestore, doc, getDoc, setDoc, onSnapshot, runTransaction, serverTimestamp } from 'firebase/firestore'
 import { getAuth, signInAnonymously, onAuthStateChanged } from 'firebase/auth'
 
+const lyricsPanelEl = ref(null)
+const lyricsFullscreenEl = ref(null)
 // Helpers
 const ensureId = (s) => ({ ...s, id: s?.id ?? (crypto?.randomUUID ? crypto.randomUUID() : String(Date.now() + Math.random())) })
 const expandedRowId = ref(null)
@@ -381,6 +384,7 @@ const isPlaying = ref(false)
 const currentBeat = ref(0) // 0-based
 const currentBpm = ref(bpm.value)
 const panelOpen = ref(false)
+const panelFullscreen = ref(false)
 
 // AudioContext e scheduling
 let audioCtx = null
@@ -398,12 +402,17 @@ function selectSong(song) {
   bpm.value = song.bpm
   beats.value = song.beats
   noteValue.value = song.noteValue
+  if (selected.value && typeof selected.value.scrollSpeed === 'undefined') {
+    selected.value.scrollSpeed = 0          // ← default
+  }
   if (wasPlaying && audioCtx) {
     current16thNote = 0
     currentBeat.value = 0
     nextNoteTime = audioCtx.currentTime + 0.1
   }
 }
+
+
 
 // Salvataggio modifiche sulla canzone selezionata
 function saveEdits() {
@@ -464,6 +473,7 @@ function start() {
     audioCtx.resume()
   }
   isPlaying.value = true
+  if ((selected.value?.scrollSpeed || 0) > 0) startAutoScroll()
   current16thNote = 0
   currentBeat.value = 0
   nextNoteTime = audioCtx.currentTime + 0.1
@@ -476,6 +486,7 @@ function stop() {
   isPlaying.value = false
   if (schedulerTimer) { clearInterval(schedulerTimer); schedulerTimer = null }
   if (audioCtx && audioCtx.state !== 'closed') { audioCtx.suspend() }
+  stopAutoScroll()
 }
 
 function toggle() { isPlaying.value ? stop() : start() }
@@ -719,6 +730,7 @@ function saveSong() {
       bpm: clean(form.bpm, 20, 300, 100),
       beats: clean(form.beats, 1, 12, 4),
       noteValue: [1,2,4,8,16].includes(+form.noteValue) ? +form.noteValue : 4,
+      scrollSpeed: Math.max(0, Number(form.scrollSpeed || 0)),
     }
     if (typeof form.lyrics === 'string') {
       data.lyrics = form.lyrics
@@ -799,7 +811,6 @@ function onRenamePlaylist() {
   renamePlaylist(selectedPlaylistId.value, name)
 }
 
-const panelFullscreen = ref(false)
 
 
 function toggleFullscreen(){
@@ -819,6 +830,87 @@ if(!selected.value || songs.value.length < 2) return
 const idx = songs.value.findIndex(s => s.id === selected.value.id)
 if(idx >= 0 && idx < songs.value.length-1) selectSong(songs.value[idx+1])
 }
+
+let _rafId = null
+let _lastTs = 0
+
+function getScrollTargets() {
+  const els = []
+  if (panelOpen.value && lyricsPanelEl.value) els.push(lyricsPanelEl.value)
+  if (panelFullscreen.value && lyricsFullscreenEl.value) els.push(lyricsFullscreenEl.value)
+  return els
+}
+
+function _step(ts) {
+  if (!isPlaying.value) { stopAutoScroll(); return }
+  const speed = Number(selected.value?.scrollSpeed || 0)
+  if (speed <= 0) { stopAutoScroll(); return }
+
+  const dt = _lastTs ? (ts - _lastTs) / 1000 : 0
+  _lastTs = ts
+
+  const els = getScrollTargets()
+  if (els.length) {
+    els.forEach(el => {
+      const atBottom = el.scrollTop + el.clientHeight >= el.scrollHeight - 1
+      if (!atBottom) el.scrollTop += speed * dt
+    })
+  }
+
+  _rafId = requestAnimationFrame(_step)
+}
+
+function startAutoScroll() {
+  stopAutoScroll()
+  _lastTs = 0
+  _rafId = requestAnimationFrame(_step)
+}
+
+function stopAutoScroll() {
+  if (_rafId) cancelAnimationFrame(_rafId)
+  _rafId = null
+  _lastTs = 0
+}
+
+function resetAutoScroll() {
+  getScrollTargets().forEach(el => { el.scrollTop = 0 })
+}
+
+watch([panelOpen, panelFullscreen], async () => {
+  if (!isPlaying.value) return
+  await nextTick() // aspetta che i container (panel/fullscreen) siano montati
+  if ((selected.value?.scrollSpeed || 0) > 0) startAutoScroll()
+})
+
+watch(isPlaying, (val) => {
+  if (val) {
+    resetAutoScroll()
+    if ((selected.value?.scrollSpeed || 0) > 0) startAutoScroll()
+  } else {
+    stopAutoScroll()
+  }
+})
+
+// Proxy per la velocità: scrive nel brano + salva su Firestore + riavvia autoscroll
+const scrollSpeedModel = computed({
+  get: () => Number(selected.value?.scrollSpeed ?? 0),
+  set: (val) => {
+    if (!selected.value) return
+    console.log('Scroll speed changed:', val);
+    const n = Math.max(0, Number(val) || 0)
+    console.log(selected.value.scrollSpeed)
+      selected.value.scrollSpeed = n
+      saveSharedDebounced() // Questo salva in Firestore
+      
+      // Riavvia l'autoscroll se è in riproduzione
+      if (isPlaying.value) {
+        resetAutoScroll()
+        if (n > 0) startAutoScroll()
+      }
+  }
+})
+
+
 
 </script>
 
