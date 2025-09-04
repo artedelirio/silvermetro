@@ -333,6 +333,7 @@ import { initializeApp, getApps } from 'firebase/app'
 import { getFirestore, doc, getDoc, setDoc, onSnapshot, runTransaction, serverTimestamp } from 'firebase/firestore'
 import { getAuth, signInAnonymously, onAuthStateChanged } from 'firebase/auth'
 
+
 const lyricsPanelEl = ref(null)
 const lyricsFullscreenEl = ref(null)
 // Helpers
