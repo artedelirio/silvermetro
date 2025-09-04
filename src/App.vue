@@ -267,48 +267,58 @@
 	</v-footer>
 	<!-- Fullscreen Panel -->
 <!-- Fullscreen Panel -->
-<v-dialog v-model="panelFullscreen" fullscreen scrollable transition="dialog-bottom-transition">
-  <v-card>
-    <v-toolbar density="comfortable">
-      <v-btn icon="mdi-close" variant="text" @click="panelFullscreen=false"/>
-      <!-- <v-toolbar-title>{{ selected?.title || 'Nessun brano' }}</v-toolbar-title> -->
-      <v-toolbar-subtitle>{{ selected?.title || 'Nessun brano' }}</v-toolbar-subtitle>
-
-      <v-spacer />
-      <v-btn
-        :disabled="!selected || songs.length <= 1 || (selected && songs[0]?.id === selected.id)"
-        icon="mdi-skip-previous"
-        variant="text"
-        @click="goPrevSong"
-      />
-      <v-btn :icon="isPlaying ? 'mdi-stop' : 'mdi-play'" :color="isPlaying ? 'error' : 'success'" @click="toggle" />
-      <v-btn
-        :disabled="!selected || songs.length <= 1 || (selected && songs[songs.length-1]?.id === selected.id)"
-        icon="mdi-skip-next"
-        variant="text"
-        @click="goNextSong"
-      />
-    </v-toolbar>
-    <div v-if="selected" class="px-4 pt-4 pb-1">
-      <v-slider
-        v-model.number="scrollSpeedModel"
-        :min="0"
-        :max="300"
-        :step="5"
-        thumb-label="always"
-        label="Velocità scorrimento (px/s)"
-      />
-      <div class="text-caption text-medium-emphasis text-center">
-        {{ Math.round(scrollSpeedModel) }} px/s — 0 = disattivato
+  <v-dialog v-model="panelFullscreen" fullscreen scrollable transition="dialog-bottom-transition">
+    <v-card class="d-flex flex-column" style="height: 100vh;">
+      <v-toolbar density="comfortable">
+        <v-btn icon="mdi-close" variant="text" @click="panelFullscreen=false"/>
+        <v-toolbar-subtitle>{{ selected?.title || 'Nessun brano' }}</v-toolbar-subtitle>
+        <v-spacer />
+        <v-btn
+          :disabled="!selected || songs.length <= 1 || (selected && songs[0]?.id === selected.id)"
+          icon="mdi-skip-previous"
+          variant="text"
+          @click="goPrevSong"
+        />
+        <v-btn :icon="isPlaying ? 'mdi-stop' : 'mdi-play'" 
+               :color="isPlaying ? 'error' : 'success'" 
+               @click="toggle" />
+        <v-btn
+          :disabled="!selected || songs.length <= 1 || (selected && songs[songs.length-1]?.id === selected.id)"
+          icon="mdi-skip-next"
+          variant="text"
+          @click="goNextSong"
+        />
+      </v-toolbar>
+      
+      <div v-if="selected" class="px-4 pt-2 pb-3">
+        <v-slider
+          v-model="scrollSpeedModel"
+          :min="0"
+          :max="300"
+          :step="5"
+          thumb-label="always"
+          label="Velocità scorrimento (px/s)"
+          class="mb-2"
+        />
+        <div class="text-caption text-medium-emphasis text-center">
+          {{ Math.round(scrollSpeedModel) }} px/s — 0 = disattivato
+        </div>
       </div>
-    </div>
-    <v-card-text class="pa-3">
-      <div class="lyrics-fullscreen" ref="lyricsFullscreenEl">
-        <pre class="lyrics-pre">{{ selected?.lyrics || '— Nessun testo —' }}</pre>
-      </div>
-    </v-card-text>
-  </v-card>
-</v-dialog>
+      
+      <v-card-text class="pa-0 flex-grow-1" style="min-height: 0; overflow: hidden;">
+        <div 
+          ref="lyricsFullscreenEl" 
+          class="lyrics-fullscreen-container"
+          style="height: 100%; overflow-y: auto; padding: 16px;"
+        >
+          <pre 
+            class="lyrics-pre" 
+            :style="{ minHeight: '100%' }"
+          >{{ selected?.lyrics || '— Nessun testo —' }}</pre>
+        </div>
+      </v-card-text>
+    </v-card>
+  </v-dialog>
 
 
   </v-app>
