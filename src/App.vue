@@ -1,11 +1,12 @@
 <template>
-  <v-app>
+  <v-app :style="appStyle">
     <!-- App Bar con gestione playlist -->
     <v-app-bar density="comfortable">
       <v-app-bar-title>
         <v-icon class="mr-2" color="primary">mdi-music</v-icon>
       </v-app-bar-title>
-      <!-- Selettore playlist -->
+
+      <!-- Selettore playlist (solo da Firestore) -->
       <v-select
         v-model="selectedPlaylistId"
         :items="playlists"
@@ -16,32 +17,52 @@
         variant="outlined"
         style="max-width: 240px"
         class="mr-2"
+        :disabled="!cloudReady"
       />
 
       <!-- Azioni playlist -->
-      <v-btn icon="mdi-playlist-plus" title="Nuova playlist" @click="addPlaylist()" />
       <v-menu>
         <template #activator="{ props }">
-          <v-btn v-bind="props" icon="mdi-cog" title="Gestisci playlist" />
+          <v-btn v-bind="props" icon="mdi-playlist-plus" title="Gestisci playlist" :disabled="!cloudReady" />
         </template>
         <v-list>
+          <v-list-item @click="addPlaylist()" :disabled="!cloudReady">
+        <v-list-item-title>Nuova playlist</v-list-item-title>
+          </v-list-item>
           <v-list-item :disabled="!selectedPlaylistId" @click="onRenamePlaylist">
-            <v-list-item-title>Rinomina</v-list-item-title>
+        <v-list-item-title>Rinomina</v-list-item-title>
           </v-list-item>
           <v-list-item :disabled="!selectedPlaylistId" @click="selectedPlaylistId && duplicatePlaylist(selectedPlaylistId)">
-            <v-list-item-title>Duplica</v-list-item-title>
+        <v-list-item-title>Duplica</v-list-item-title>
           </v-list-item>
           <v-list-item :disabled="playlists.length<=1 || !selectedPlaylistId" @click="selectedPlaylistId && removePlaylist(selectedPlaylistId)">
-            <v-list-item-title class="text-error">Elimina</v-list-item-title>
+        <v-list-item-title class="text-error">Elimina</v-list-item-title>
           </v-list-item>
         </v-list>
       </v-menu>
+
+      <!-- Import JSON in playlist corrente -->
+      <!-- <v-btn icon="mdi-file-import" title="Importa brani da JSON" :disabled="!cloudReady || !selectedPlaylistId" @click="fileInput && fileInput.click()" />
+      <input ref="fileInput" type="file" accept="application/json" class="d-none" @change="onImportFile"/>
+
+      <v-spacer /> -->
+
+      <!-- Stato cloud: solo icona colorata -->
+      <v-icon
+        class="mr-2"
+        :color="!cloudReady ? 'grey' : (!cloudSynced ? 'amber' : 'green')"
+        title="Stato cloud"
+      >
+        mdi-cloud
+      </v-icon>
     </v-app-bar>
 
     <!-- Lista canzoni -->
     <v-main>
       <v-container class="pa-0 ma-0" fluid style="max-width: 100vw;">
-        <v-list lines="two" density="comfortable">
+        <v-skeleton-loader v-if="!cloudReady" type="list-item-two-line@6" class="ma-4" />
+
+        <v-list v-else lines="two" density="comfortable">
           <v-list-item
             v-for="(song, index) in songs"
             :key="song.id"
@@ -69,23 +90,22 @@
           </v-list-item>
         </v-list>
 
-        <template v-if="!songs.length">
+        <template v-if="cloudReady && !songs.length">
           <div class="pa-6 text-medium-emphasis">Nessuna canzone. Clicca “+” per aggiungerne una.</div>
         </template>
 
         <v-divider />
         <v-card-actions>
-          <v-btn block prepend-icon="mdi-plus" @click="openDialogForNew" :disabled="isPlaying">Aggiungi Brano</v-btn>
+          <v-btn block prepend-icon="mdi-plus" @click="openDialogForNew" :disabled="isPlaying || !cloudReady">Aggiungi Brano</v-btn>
         </v-card-actions>
       </v-container>
     </v-main>
 
     <!-- Dialog nuova/modifica canzone -->
-    <v-dialog v-model="dialog" max-width="520">
+    <v-dialog v-model="dialog" fullscreen scrollable>
       <v-card>
         <v-card-title>{{ editTarget ? 'Modifica brano' : 'Aggiungi brano' }}</v-card-title>
         <v-card-text>
-          <v-divider class="my-4" />
           <v-select
             v-if="!editTarget"
             v-model="form.existingSongIds"
@@ -95,21 +115,51 @@
             label="Brani da altre playlist"
             hint="Seleziona uno o più brani da copiare nella playlist corrente"
             density="compact"
-              :menu-props="{
-              maxHeight: '400px',
-              minWidth: '300px',
-              offsetY: true,
-              contentClass: 'custom-select-menu'
-              }"
+            :menu-props="{ maxHeight: '400px', minWidth: '300px', offsetY: true, contentClass: 'custom-select-menu' }"
             multiple
             chips
           />
-          <v-divider class="my-4" />
           <v-form ref="formRef" @submit.prevent="saveSong">
             <v-text-field v-model="form.title" label="Titolo" required />
             <v-text-field v-model.number="form.bpm" type="number" label="BPM" :min="20" :max="300" required />
-            <v-text-field v-model.number="form.beats" type="number" label="Beats (sopra)" :min="1" :max="12" required />
-            <v-select v-model="form.noteValue" :items="noteItems" item-title="label" item-value="value" label="Nota (sotto)" required />
+            <v-row>
+              <v-col cols="6">
+                <v-text-field
+                  v-model.number="form.beats"
+                  type="number"
+                  :min="1"
+                  :max="12"
+                  required
+                  hide-details
+                  density="compact"
+                  style="margin-bottom:0"
+                />
+              </v-col>
+              <v-col cols="1" class="d-flex align-center justify-center px-0" style="max-width:24px;">
+                <span style="font-size: 1.4em; font-weight: 500;">/</span>
+              </v-col>
+              <v-col cols="5">
+                <v-select
+                  v-model="form.noteValue"
+                  :items="noteItems"
+                  item-title="label"
+                  item-value="value"
+                  required
+                  hide-details
+                  density="compact"
+                  style="margin-bottom:0"
+                />
+              </v-col>
+            </v-row>
+            <div style="margin-bottom: 12px;"></div>
+            <v-textarea
+              v-model="form.lyrics"
+              class="mono-textarea"
+              label="Testo"
+              auto-grow
+              rows="6"
+              hint="Usa testo monospaziato per allineare gli accordi"
+            />
           </v-form>
         </v-card-text>
         <v-card-actions>
@@ -132,80 +182,134 @@
         </v-card-actions>
       </v-card>
     </v-dialog>
+	<v-footer app elevation="15" class="fixed-panel">
+	  <div class="w-100">
+		<!-- Riga compatta -->
+		<div class="d-flex align-center justify-space-between flex-wrap gap-2 px-3 py-2">
+		  <div class="d-flex align-center gap-3 w-100">
+			<v-icon class="mr-1">mdi-timer</v-icon>
+			<div>
+			  <div class="text-subtitle-2" v-if="selected">{{ selected.title }}</div>
+			  <div class="text-medium-emphasis">{{ Math.round(currentBpm) }} BPM</div>
+			</div>
+			<v-spacer />
+			<div class="d-flex align-center justify-center" style="min-width:120px; gap:4px;">
+			  <v-btn
+				:disabled="!selected || songs.length <= 1 || (selected && songs[0]?.id === selected.id)"
+				icon="mdi-skip-previous"
+				density="default"
+				variant="text"
+				@click="onPrevClick"
+				title="Brano precedente"
+			  />
+			  <v-btn
+				:icon="isPlaying ? 'mdi-stop' : 'mdi-play'"
+				density="default"
+				:color="isPlaying ? 'error' : 'success'"
+				@click="toggle"
+				class="mx-auto"
+				title="Play/Stop"
+			  />
+			  <v-btn
+				:disabled="!selected || songs.length <= 1 || (selected && songs[songs.length-1]?.id === selected.id)"
+				icon="mdi-skip-next"
+				density="default"
+				variant="text"
+				@click="onNextClick"
+				title="Brano successivo"
+			  />
+			</div>
+		  </div>
 
-    <!-- Pannello fisso inferiore: metronomo & editor -->
-    <v-footer app elevation="15" class="fixed-panel">
-      <div class="w-100">
-        <!-- Riga compatta -->
-        <div class="d-flex align-center justify-space-between flex-wrap gap-2 px-3 py-2">
-          <div class="d-flex align-center gap-3 w-100">
-            <v-icon class="mr-1">mdi-timer</v-icon>
-            <div>
-              <div class="text-subtitle-2" v-if="selected">{{ selected.title }}</div>
-              <div class="text-medium-emphasis">{{ Math.round(currentBpm) }} BPM</div>
-            </div>
-            <v-spacer />
-            <div class="d-flex align-center justify-center" style="min-width:48px;">
-              <v-btn
-                :icon="isPlaying ? 'mdi-stop' : 'mdi-play'"
-                density="default"
-                :color="isPlaying ? 'error' : 'success'"
-                @click="toggle"
-                class="mx-auto"
-              />
-            </div>
-          </div>
+		  <v-row class="w-100" align="center" no-gutters>
+			<v-col cols="6" class="d-flex align-center">
+			  <v-switch
+				v-model="accentFirst"
+				:disabled="isPlaying"
+				prepend-icon="mdi-music-circle"
+				class="ma-0 pa-0"
+			  />
+			</v-col>
+			<v-col cols="6" class="d-flex justify-end align-center" style="gap:4px;">
+			  <v-btn icon variant="text" @click="panelOpen = !panelOpen" :title="panelOpen ? 'Chiudi editor' : 'Apri editor'">
+				<v-icon>{{ panelOpen ? 'mdi-chevron-down' : 'mdi-chevron-up' }}</v-icon>
+			  </v-btn>
+			  <v-btn icon variant="text" @click="panelFullscreen = true" title="Apri a tutto schermo">
+				<v-icon>mdi-arrow-expand</v-icon>
+			  </v-btn>
+			</v-col>
+			<!-- Indicatore battute -->
+			<v-col cols="12" class="d-flex justify-center align-center">
+			  <div class="d-flex justify-center align-center flex-wrap w-100" style="gap: 12px; min-height: 20px;">
+				<div
+				  v-for="n in beats"
+				  :key="n"
+				  class="beat-dot"
+				  :class="{ active: isPlaying && (currentBeat === n - 1), accent: (n === 1) }"
+				/>
+			  </div>
+			</v-col>
+		  </v-row>
+		</div>
 
-          <v-row class="w-100" align="center" no-gutters>
-            <v-col cols="6" class="d-flex align-center">
-              <v-switch
-                v-model="accentFirst"
-                :disabled="isPlaying"
-                prepend-icon="mdi-music-circle"
-                class="ma-0 pa-0"
-              />
-            </v-col>
-            <v-col cols="6" class="d-flex justify-end align-center">
-              <v-btn icon variant="text" @click="panelOpen = !panelOpen">
-                <v-icon>{{ panelOpen ? 'mdi-chevron-down' : 'mdi-chevron-up' }}</v-icon>
-              </v-btn>
-            </v-col>
-            <!-- Indicatore battute -->
-            <v-col cols="12" class="d-flex justify-center align-center">
-              <div class="d-flex justify-center align-center flex-wrap w-100" style="gap: 12px; min-height: 20px;">
-                <div
-                  v-for="n in beats"
-                  :key="n"
-                  class="beat-dot"
-                  :class="{ active: isPlaying && (currentBeat === n - 1), accent: (n === 1) }"
-                />
-              </div>
-            </v-col>
-          </v-row>
-        </div>
+		<!-- Editor espandibile -->
+<v-expand-transition> <div v-show="panelOpen" class="pa-0">
+  <div
+  v-if="selected && selected.lyrics"
+  ref="lyricsPanelEl"
+  class="lyrics-viewer mt-2 ma-0 mb-5"
+  style="max-height: 300px; overflow-y: auto; font-family: ui-monospace, monospace; font-size: 0.98em; background: #f8f8f8; border-radius: 6px; padding: 8px 12px; white-space: pre-wrap;"
+>
+  {{ selected.lyrics }}
+</div>
+</div> </v-expand-transition>
+	  </div>
+	</v-footer>
+	<!-- Fullscreen Panel -->
+<!-- Fullscreen Panel -->
+<v-dialog v-model="panelFullscreen" fullscreen scrollable transition="dialog-bottom-transition">
+  <v-card>
+    <v-toolbar density="comfortable">
+      <v-btn icon="mdi-close" variant="text" @click="panelFullscreen=false"/>
+      <!-- <v-toolbar-title>{{ selected?.title || 'Nessun brano' }}</v-toolbar-title> -->
+      <v-toolbar-subtitle>{{ selected?.title || 'Nessun brano' }}</v-toolbar-subtitle>
 
-        <!-- Editor espandibile -->
-        <v-expand-transition>
-          <div v-show="panelOpen" class="px-3 pb-3">
-            <v-divider class="mb-3" />
-            <v-row class="mt-1" align="center" justify="center">
-              <v-col cols="12" md="3">
-                <v-text-field type="number" label="BPM" v-model.number="bpm" :min="20" :max="300" :disabled="isPlaying" hide-details />
-              </v-col>
-              <v-col cols="6" md="3">
-                <v-text-field type="number" label="Beats (sopra)" v-model.number="beats" :min="1" :max="12" :disabled="isPlaying" hide-details />
-              </v-col>
-              <v-col cols="6" md="3">
-                <v-select :items="noteItems" item-title="label" item-value="value" label="Nota (sotto)" v-model="noteValue" :disabled="isPlaying" hide-details />
-              </v-col>
-              <v-col cols="12" md="3" class="d-flex align-center">
-                <v-btn block prepend-icon="mdi-content-save" :disabled="!selected || isPlaying" @click="saveEdits">Salva</v-btn>
-              </v-col>
-            </v-row>
-          </div>
-        </v-expand-transition>
+      <v-spacer />
+      <v-btn
+        :disabled="!selected || songs.length <= 1 || (selected && songs[0]?.id === selected.id)"
+        icon="mdi-skip-previous"
+        variant="text"
+        @click="goPrevSong"
+      />
+      <v-btn :icon="isPlaying ? 'mdi-stop' : 'mdi-play'" :color="isPlaying ? 'error' : 'success'" @click="toggle" />
+      <v-btn
+        :disabled="!selected || songs.length <= 1 || (selected && songs[songs.length-1]?.id === selected.id)"
+        icon="mdi-skip-next"
+        variant="text"
+        @click="goNextSong"
+      />
+    </v-toolbar>
+    <v-slider
+        v-model.number="form.scrollSpeed"
+        :min="0"
+        :max="300"
+        :step="5"
+        show-ticks
+        thumb-label="always"
+        label="Velocità scorrimento (px/s)"
+      />
+      <div class="text-caption text-medium-emphasis">
+        {{ form.scrollSpeed }} px/s — 0 = disattivato
       </div>
-    </v-footer>
+    <v-card-text class="pa-3">
+      <div class="lyrics-fullscreen">
+        <pre class="lyrics-pre">{{ selected?.lyrics || '— Nessun testo —' }}</pre>
+      </div>
+    </v-card-text>
+  </v-card>
+</v-dialog>
+
+
   </v-app>
 </template>
 
@@ -214,72 +318,64 @@ import { ref, reactive, computed, onMounted, onBeforeUnmount, watch } from 'vue'
 import { Capacitor } from '@capacitor/core'
 import { KeepAwake } from '@capacitor-community/keep-awake'
 import { StatusBar, Style } from '@capacitor/status-bar'
+import { initializeApp, getApps } from 'firebase/app'
+import { getFirestore, doc, getDoc, setDoc, onSnapshot, runTransaction, serverTimestamp } from 'firebase/firestore'
+import { getAuth, signInAnonymously, onAuthStateChanged } from 'firebase/auth'
 
 // Helpers
 const ensureId = (s) => ({ ...s, id: s?.id ?? (crypto?.randomUUID ? crypto.randomUUID() : String(Date.now() + Math.random())) })
 const expandedRowId = ref(null)
 
-// --- Modello Playlist ---
-const STORAGE_KEY = 'metronome_playlists_v1'
-const OLD_KEY = 'metronome_songs_v1'
-
-function loadPlaylists() {
-  try {
-    const raw = localStorage.getItem(STORAGE_KEY)
-    if (raw) {
-      const data = JSON.parse(raw)
-      if (Array.isArray(data)) {
-        // Caso 1: già playlist corrette (hanno .songs)
-        if (data.length === 0 || data[0]?.songs) {
-          return data
-        }
-        // Caso 2: array di canzoni salvato per errore (shape flat)
-        if (data[0]?.title || data[0]?.bpm) {
-          return [{ id: crypto.randomUUID(), name: 'Importata', songs: data.map(ensureId) }]
-        }
-      }
-    }
-    // Migrazione dal vecchio storage
-    const old = JSON.parse(localStorage.getItem(OLD_KEY) || '[]')
-    const migrated = [{ id: crypto.randomUUID(), name: 'Default', songs: (old || []).map(ensureId) }]
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(migrated))
-    return migrated
-  } catch {
-    return []
-  }
+// Config da .env (Vite)
+const firebaseConfig = {
+  apiKey: import.meta.env.VITE_FB_API_KEY,
+  authDomain: import.meta.env.VITE_FB_AUTH_DOMAIN,
+  projectId: import.meta.env.VITE_FB_PROJECT_ID,
+  appId: import.meta.env.VITE_FB_APP_ID,
 }
 
-function savePlaylists(arr) {
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(arr))
-}
-// Helper unico di persistenza
-const persist = () => savePlaylists(playlists.value)
+// Inizializza una volta
+const appFb = getApps().length ? getApps()[0] : initializeApp(firebaseConfig)
+const db = getFirestore(appFb)
+const auth = getAuth(appFb)
 
-// Stato principale
-const playlists = ref(loadPlaylists())
-const selectedPlaylistId = ref(playlists.value[0]?.id || null)
+// Riferimento al documento condiviso (singolo)
+const sharedRef = doc(db, 'shared', 'global')
+
+// Stato cloud
+const cloudReady = ref(false)   // auth + primo fetch completati
+const cloudSynced = ref(false)  // ultimo write o snapshot applicato
+let lastLocalRev = 0            // rev dell'ultimo write locale
+
+// --- MODELLO CLOUD ---
+// Struttura doc: { playlists: Playlist[], selectedId: string|null, rev: number, updatedAt: Timestamp }
+
+// Stato principale (solo RAM, nessun localStorage)
+const playlists = ref([])
+const selectedPlaylistId = ref(null)
 
 const currentPlaylist = computed(() => playlists.value.find(p => p.id === selectedPlaylistId.value) || null)
 
 const songs = computed({
   get: () => currentPlaylist.value?.songs || [],
-  set: (val) => { if (currentPlaylist.value) { currentPlaylist.value.songs = val; persist() } },
+  set: (val) => { if (currentPlaylist.value) { currentPlaylist.value.songs = val; saveSharedDebounced() } },
 })
 
 // Canzone selezionata
-const selected = ref(songs.value[0] || null)
+const selected = ref(null)
 
 // Cambi playlist → reset canzone
 watch(selectedPlaylistId, () => {
   const first = songs.value[0] || null
   selected.value = first
   if (first) { bpm.value = first.bpm; beats.value = first.beats; noteValue.value = first.noteValue }
+  saveSharedDebounced()
 })
 
 // Stato metronomo
-const bpm = ref(selected.value?.bpm || 100)
-const beats = ref(selected.value?.beats || 4)
-const noteValue = ref(selected.value?.noteValue || 4)
+const bpm = ref(100)
+const beats = ref(4)
+const noteValue = ref(4)
 const accentFirst = ref(true)
 const isPlaying = ref(false)
 const currentBeat = ref(0) // 0-based
@@ -292,7 +388,7 @@ let nextNoteTime = 0
 let current16thNote = 0
 let schedulerTimer = null
 
-// Calcolo intervallo tra battiti (supporta 7/8, 6/16, ...)
+// Calcolo intervallo tra battiti
 const secondsPerBeat = computed(() => (60.0 / bpm.value) * (4 / noteValue.value))
 
 // Selezione canzone
@@ -316,12 +412,12 @@ function saveEdits() {
   selected.value.bpm = clean(bpm.value, 20, 300, 100)
   selected.value.beats = clean(beats.value, 1, 12, 4)
   selected.value.noteValue = [1,2,4,8,16].includes(+noteValue.value) ? +noteValue.value : 4
-  persist()
+  saveSharedDebounced()
 }
 
-// Riordino con pulsanti su/giù (senza dipendenze)
-function moveUp(i){ if (i<=0) return; const arr=songs.value; const [m]=arr.splice(i,1); arr.splice(i-1,0,m); persist() }
-function moveDown(i){ if (i>=songs.value.length-1) return; const arr=songs.value; const [m]=arr.splice(i,1); arr.splice(i+1,0,m); persist() }
+// Riordino con pulsanti su/giù
+function moveUp(i){ if (i<=0) return; const arr=songs.value; const [m]=arr.splice(i,1); arr.splice(i-1,0,m); saveSharedDebounced() }
+function moveDown(i){ if (i>=songs.value.length-1) return; const arr=songs.value; const [m]=arr.splice(i,1); arr.splice(i+1,0,m); saveSharedDebounced() }
 
 // Riproduzione click
 function playClick(accent = false, when = 0) {
@@ -335,12 +431,6 @@ function playClick(accent = false, when = 0) {
   gain.gain.exponentialRampToValueAtTime(accent ? 1.0 : 0.8, when + 0.001)
   gain.gain.exponentialRampToValueAtTime(0.0001, when + 0.05)
   osc.stop(when + 0.07)
-}
-
-function onRenamePlaylist() {
-  if (!selectedPlaylistId.value) return
-  const name = prompt('Nuovo nome playlist') || ''
-  renamePlaylist(selectedPlaylistId.value, name)
 }
 
 // Scheduling
@@ -391,6 +481,8 @@ function stop() {
 function toggle() { isPlaying.value ? stop() : start() }
 
 let bpmMonitor = null
+
+// --- FIREBASE AUTH + SYNC ---
 onMounted(async () => {
   // Status bar solo su device
   if (Capacitor.isNativePlatform()) {
@@ -402,14 +494,63 @@ onMounted(async () => {
     } catch (err) { console.warn('StatusBar non disponibile:', err) }
   }
 
-  // Se non ci sono canzoni nella playlist corrente, crea un esempio
-  if (!songs.value.length) {
-    songs.value = [ { id: crypto.randomUUID(), title: 'Brano di esempio', bpm: 100, beats: 4, noteValue: 4 } ]
-    persist()
-    selected.value = songs.value[0]
-  }
-
   bpmMonitor = setInterval(() => { currentBpm.value = bpm.value }, 500)
+
+  try {
+    // Login anonimo
+    await signInAnonymously(auth)
+    onAuthStateChanged(auth, (u) => { /* opzionale: mostrare uid */ })
+
+    // Primo fetch + bootstrap documento, se non esiste
+    await runTransaction(db, async (trx) => {
+      const snap = await trx.get(sharedRef)
+      if (!snap.exists()) {
+        const initial = {
+          playlists: [ { id: crypto.randomUUID(), name: 'Default', songs: [] } ],
+          selectedId: null,
+          rev: 1,
+          updatedAt: serverTimestamp(),
+        }
+        trx.set(sharedRef, initial)
+        playlists.value = initial.playlists
+        selectedPlaylistId.value = initial.playlists[0].id
+        lastLocalRev = initial.rev
+      } else {
+        const data = snap.data() || {}
+        playlists.value = Array.isArray(data.playlists) ? data.playlists : []
+        selectedPlaylistId.value = data.selectedId || playlists.value[0]?.id || null
+        lastLocalRev = Number(data.rev || 0)
+      }
+    })
+
+    // Realtime listener con protezione anti-echo
+    onSnapshot(sharedRef, (snap) => {
+      if (!snap.exists()) return
+      const data = snap.data() || {}
+      const remoteRev = Number(data.rev || 0)
+      if (remoteRev < lastLocalRev) {
+        // snapshot vecchio (echo di write non ancora consolidati): ignora
+        return
+      }
+      const cloudPlaylists = Array.isArray(data.playlists) ? data.playlists : []
+      const cloudSelected = data.selectedId || cloudPlaylists[0]?.id || null
+
+      const localJson = JSON.stringify(playlists.value)
+      const cloudJson = JSON.stringify(cloudPlaylists)
+      if (localJson !== cloudJson || selectedPlaylistId.value !== cloudSelected) {
+        playlists.value = cloudPlaylists
+        selectedPlaylistId.value = cloudSelected
+      }
+      cloudSynced.value = true
+      cloudReady.value = true
+    })
+
+    cloudReady.value = true
+    cloudSynced.value = true
+  } catch (e) {
+    console.warn('Firestore offline o auth fallita:', e)
+    cloudReady.value = false
+  }
 })
 
 onBeforeUnmount(() => {
@@ -419,13 +560,83 @@ onBeforeUnmount(() => {
   if (audioCtx && audioCtx.state !== 'closed') audioCtx.close()
 })
 
-// Persistenza profonda di ogni modifica a qualunque playlist/canzone
-watch(playlists, savePlaylists, { deep: true })
+// Debounce salvataggi per non chattare troppo col cloud
+let _tCloud = null
+function saveSharedDebounced() {
+  clearTimeout(_tCloud)
+  cloudSynced.value = false
+  _tCloud = setTimeout(() => { saveSharedNow().catch(() => {}) }, 700)
+}
+
+async function saveSharedNow() {
+  // Normalizza: garantisci id per tutte le entità
+  const cleaned = (playlists.value || []).map(p => ({
+    id: p.id || crypto.randomUUID(),
+    name: p.name || 'Senza nome',
+    songs: (p.songs || []).map(ensureId)
+  }))
+
+  // rev++ per anti-echo semplice
+  const nextRev = lastLocalRev + 1
+  await setDoc(sharedRef, {
+    playlists: cleaned,
+    selectedId: selectedPlaylistId.value || null,
+    rev: nextRev,
+    updatedAt: serverTimestamp(),
+  }, { merge: true })
+  lastLocalRev = nextRev
+  cloudSynced.value = true
+}
+
+// ---- IMPORT JSON ----
+const fileInput = ref(null)
+
+function normalizeSongsFromJson(data) {
+  // accetta array o oggetto-lookup
+  let arr = []
+  if (Array.isArray(data)) arr = data
+  else if (data && typeof data === 'object') arr = Object.values(data)
+
+  const clampNum = (n, min, max, fallback) => Number.isFinite(+n) ? Math.min(max, Math.max(min, +n)) : fallback
+
+  return arr
+    .filter(s => s && (s.title || s.name || s.Titolo))
+    .map(s => ({
+      id: crypto.randomUUID(),
+      title: String(s.title ?? s.name ?? s.Titolo ?? 'Senza titolo'),
+      bpm: clampNum(s.bpm ?? s.BPM ?? s.tempo, 20, 300, 100),
+      beats: clampNum(s.beats ?? s.timeSigTop ?? s.misure, 1, 12, 4),
+      noteValue: [1,2,4,8,16].includes(+(s.noteValue ?? s.timeSigBottom)) ? +(s.noteValue ?? s.timeSigBottom) : 4,
+      lyrics: typeof s.lyrics === 'string' ? s.lyrics : '',
+      scrollSpeed: Math.max(0, Number(s.scrollSpeed || 0)),
+    }))
+}
+
+async function onImportFile(ev) {
+  const file = ev?.target?.files?.[0]
+  try {
+    if (!file) return
+    if (!selectedPlaylistId.value) { alert('Seleziona una playlist prima di importare.'); return }
+    const text = await file.text()
+    const json = JSON.parse(text)
+    const list = normalizeSongsFromJson(json)
+    if (!list.length) { alert('Nessun brano valido trovato nel JSON.'); return }
+    const pl = playlists.value.find(p => p.id === selectedPlaylistId.value)
+    if (!pl) { alert('Playlist non trovata.'); return }
+    pl.songs = [...(pl.songs || []), ...list]
+    saveSharedDebounced()
+  } catch (e) {
+    console.error('Import JSON error', e)
+    alert('JSON non valido o errore durante l\'import. Controlla la console.')
+  } finally {
+    if (ev?.target) ev.target.value = '' // reset input
+  }
+}
 
 // Dialog gestione canzone
 const dialog = ref(false)
 const formRef = ref(null)
-const form = reactive({ title: '', bpm: 100, beats: 4, noteValue: 4, existingSongIds: [] })
+const form = reactive({ title: '', bpm: 100, beats: 4, noteValue: 4, existingSongIds: [], lyrics: '', scrollSpeed: 0 })
 const editTarget = ref(null)
 
 const noteItems = [
@@ -441,7 +652,7 @@ const otherSongsOptions = computed(() => {
   const out = []
   playlists.value.forEach(p => {
     if (p.id === curId) return
-    p.songs.forEach(s => {
+    ;(p.songs || []).forEach(s => {
       out.push({
         label: `${p.name} — ${s.title} (${s.bpm} BPM • ${s.beats}/${s.noteValue})`,
         value: `${p.id}:${s.id}`,
@@ -451,21 +662,21 @@ const otherSongsOptions = computed(() => {
   return out
 })
 
-
 function openDialogForNew() {
   editTarget.value = null
-  Object.assign(form, { title: '', bpm: 100, beats: 4, noteValue: 4, existingSongIds: [] })
+  Object.assign(form, { title: '', bpm: 100, beats: 4, noteValue: 4, existingSongIds: [], lyrics: '', scrollSpeed: 0 })
   dialog.value = true
 }
 function openDialogForEdit(song) {
   editTarget.value = song
-  Object.assign(form, { title: song.title, bpm: song.bpm, beats: song.beats, noteValue: song.noteValue, existingSongIds: [] })
+  Object.assign(form, { title: song.title, bpm: song.bpm, beats: song.beats, noteValue: song.noteValue, existingSongIds: [], lyrics: song.lyrics || '', scrollSpeed: song.scrollSpeed || 0 })
   dialog.value = true
 }
 function saveSong() {
-  const clean = (n, min, max, fallback) => Number.isFinite(+n) ? Math.min(max, Math.max(min, +n)) : fallback
+  const clean = (n, min, max, fallback) =>
+    Number.isFinite(+n) ? Math.min(max, Math.max(min, +n)) : fallback
 
-  // 1) Copia brani selezionati da altre playlist
+  // 1) Copia brani selezionati da altre playlist (inclusi eventuali lyrics)
   if (Array.isArray(form.existingSongIds) && form.existingSongIds.length) {
     form.existingSongIds.forEach(key => {
       const [pid, sid] = String(key).split(':')
@@ -478,12 +689,14 @@ function saveSong() {
           bpm: clean(src.bpm, 20, 300, 100),
           beats: clean(src.beats, 1, 12, 4),
           noteValue: [1,2,4,8,16].includes(+src.noteValue) ? +src.noteValue : 4,
+          lyrics: typeof src.lyrics === 'string' ? src.lyrics : '',
+          scrollSpeed: typeof src.scrollSpeed === 'number' ? src.scrollSpeed : 0,
         })
       }
     })
   }
 
-  // 2) Crea/aggiorna nuovo brano se c'è un titolo
+  // 2) Crea/aggiorna nuovo brano (includi lyrics dal form se presenti)
   const hasNewTitle = (form.title || '').trim().length > 0
   if (hasNewTitle) {
     const data = {
@@ -491,6 +704,8 @@ function saveSong() {
       bpm: clean(form.bpm, 20, 300, 100),
       beats: clean(form.beats, 1, 12, 4),
       noteValue: [1,2,4,8,16].includes(+form.noteValue) ? +form.noteValue : 4,
+      lyrics: (form.lyrics || '').toString(),
+      scrollSpeed: Math.max(0, Number(form.scrollSpeed || 0)),
     }
     if (editTarget.value) {
       Object.assign(editTarget.value, data)
@@ -498,17 +713,20 @@ function saveSong() {
       songs.value.push({ id: crypto.randomUUID(), ...data })
     }
   } else if (editTarget.value) {
-    // in modifica, aggiorna almeno i campi numerici
+    // in modifica, aggiorna almeno i campi numerici (+ lyrics se forniti)
     const data = {
       title: editTarget.value.title,
       bpm: clean(form.bpm, 20, 300, 100),
       beats: clean(form.beats, 1, 12, 4),
       noteValue: [1,2,4,8,16].includes(+form.noteValue) ? +form.noteValue : 4,
     }
+    if (typeof form.lyrics === 'string') {
+      data.lyrics = form.lyrics
+    }
     Object.assign(editTarget.value, data)
   }
 
-  persist()
+  saveSharedDebounced()
   if (!selected.value && songs.value.length) selected.value = songs.value[0]
   dialog.value = false
 }
@@ -526,39 +744,82 @@ function doRemove() {
   if (idx >= 0) {
     const wasSelected = selected.value?.id === id
     songs.value.splice(idx, 1)
-    persist()
     if (wasSelected) selected.value = songs.value[0] || null
+    saveSharedDebounced()
   }
   confirmDialog.value = false
 }
 
-// Playlist CRUD
+// Playlist CRUD (solo cloud)
 function addPlaylist(name = 'Nuova playlist') {
   const p = { id: crypto.randomUUID(), name, songs: [] }
   playlists.value.push(p)
   selectedPlaylistId.value = p.id
-  persist()
+  saveSharedDebounced()
 }
 function renamePlaylist(id, name) {
   const p = playlists.value.find(x => x.id === id); if (!p) return
   p.name = (name || '').trim() || p.name
-  persist()
+  saveSharedDebounced()
 }
 function duplicatePlaylist(id) {
   const src = playlists.value.find(x => x.id === id); if (!src) return
   const copy = { id: crypto.randomUUID(), name: `${src.name} (copia)`, songs: src.songs.map(s => ({ ...s, id: crypto.randomUUID() })) }
   playlists.value.push(copy)
   selectedPlaylistId.value = copy.id
-  persist()
+  saveSharedDebounced()
 }
 function removePlaylist(id) {
   if (playlists.value.length <= 1) return
-  const idx = playlists.value.findIndex(x => x.id === id); if (idx < 0) return
+  const idx = playlists.value.findIndex(x => x.id === id)
+  if (idx < 0) return
+  const playlistName = playlists.value[idx]?.name || 'questa playlist'
+  if (!confirm(`Vuoi davvero eliminare "${playlistName}"?`)) return
   const removingCurrent = selectedPlaylistId.value === id
   playlists.value.splice(idx, 1)
   if (removingCurrent) selectedPlaylistId.value = playlists.value[0]?.id || null
-  persist()
+  saveSharedDebounced()
 }
+
+// UI: safe areas
+const appStyle = computed(() => {
+  if (Capacitor.isNativePlatform()) {
+    return {
+      'padding-top': 'env(safe-area-inset-top)',
+      'padding-left': 'env(safe-area-inset-left)',
+      'padding-right': 'env(safe-area-inset-right)'
+    }
+  }
+  return {}
+})
+
+function onRenamePlaylist() {
+  if (!selectedPlaylistId.value) return
+  const name = prompt('Nuovo nome playlist') || ''
+  renamePlaylist(selectedPlaylistId.value, name)
+}
+
+const panelFullscreen = ref(false)
+
+
+function toggleFullscreen(){
+panelFullscreen.value = !panelFullscreen.value
+}
+
+
+function goPrevSong(){
+if(!selected.value || songs.value.length < 2) return
+const idx = songs.value.findIndex(s => s.id === selected.value.id)
+if(idx > 0) selectSong(songs.value[idx-1])
+}
+
+
+function goNextSong(){
+if(!selected.value || songs.value.length < 2) return
+const idx = songs.value.findIndex(s => s.id === selected.value.id)
+if(idx >= 0 && idx < songs.value.length-1) selectSong(songs.value[idx+1])
+}
+
 </script>
 
 <style scoped>
@@ -566,8 +827,56 @@ function removePlaylist(id) {
 @media (max-width: 600px) { .fixed-panel { padding-bottom: env(safe-area-inset-bottom); } }
 
 .beat-dot { width: 18px; height: 18px; border-radius: 999px; border: 2px solid currentColor; opacity: 0.35; }
-.beat-dot.active { transform: scale(1.2); opacity: 1; }
+.beat-dot.active { transform: scale(1.2); opacity: 1; border-color: red;}
 .beat-dot.accent { border-width: 3px; }
 
 .selected-song { background-color: rgba(20,180,180,0.06) !important; }
+html,
+body,
+#app {
+  height: 100%;
+  margin: 0;
+}
+
+.mono-textarea :deep(textarea){
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+  white-space: pre; /* usa 'pre-wrap' se vuoi andare a capo mantenendo spazi */
+}
+
+.fixed-panel { backdrop-filter: saturate(140%) blur(6px); }
+@media (max-width: 600px) { .fixed-panel { padding-bottom: env(safe-area-inset-bottom); } }
+
+
+.beat-dot { width: 18px; height: 18px; border-radius: 999px; border: 2px solid currentColor; opacity: 0.35; }
+.beat-dot.active { transform: scale(1.2); opacity: 1; }
+.beat-dot.accent { border-width: 3px; }
+
+
+.selected-song { background-color: rgba(20,180,180,0.06) !important; }
+
+
+.panel-expandable {
+max-height: 40vh;
+overflow-y: auto;
+transition: all 0.3s ease;
+}
+.panel-expandable.fullscreen {
+position: fixed;
+top: 0;
+left: 0;
+right: 0;
+bottom: 0;
+z-index: 2000;
+background: white;
+padding: 16px;
+max-height: 100%;
+}
+
+
+.lyrics-view pre {
+font-family: ui-monospace, monospace;
+white-space: pre-wrap;
+margin: 0;
+}
+
 </style>

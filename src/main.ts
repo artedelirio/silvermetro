@@ -1,32 +1,30 @@
+// main.ts
 import { createApp } from 'vue'
 import App from './App.vue'
-import { StatusBar, Style } from '@capacitor/status-bar';
+import { StatusBar, Style } from '@capacitor/status-bar'
+import { Capacitor } from '@capacitor/core'
 
 // Vuetify
 import 'vuetify/styles'
 import { createVuetify } from 'vuetify'
 import * as components from 'vuetify/components'
 import * as directives from 'vuetify/directives'
-import { Device } from '@capacitor/device';
-import { Capacitor } from '@capacitor/core';
-
-// Icone MDI
 import '@mdi/font/css/materialdesignicons.css'
 
-const vuetify = createVuetify({ components, directives })
+const vuetify = createVuetify({ components, directives });
 
-createApp(App).use(vuetify).mount('#app')
-
-// ✅ Configura la status bar solo su Android >= 15
-async function configureStatusBar() {
+(async () => {
   if (Capacitor.getPlatform() === 'android') {
-    const info = await Device.getInfo();
-    const androidVersion = parseInt(info.osVersion.split('.')[0]);
-    if (androidVersion >= 15) {
-      await StatusBar.setOverlaysWebView({ overlay: false });
-      await StatusBar.setBackgroundColor({ color: '#CACACA' });
-      await StatusBar.setStyle({ style: Style.Dark });
+    try {
+      // Importantissimo: farlo PRIMA del mount
+      await StatusBar.setOverlaysWebView({ overlay: false })
+      await StatusBar.setBackgroundColor({ color: '#000000' }) // colore pieno, non trasparente
+      await StatusBar.setStyle({ style: Style.Light })         // icone chiare su sfondo scuro
+      await StatusBar.show()                                   // forza applicazione su alcuni OEM
+    } catch (e) {
+      console.warn('StatusBar init:', e)
     }
   }
-}
-configureStatusBar();
+
+  createApp(App).use(vuetify).mount('#app')
+})()
