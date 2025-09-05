@@ -249,18 +249,35 @@
 				/>
 			  </div>
 			</v-col>
+			<!-- Slider velocità nel pannellino -->
+			<v-col cols="12" class="px-4 pt-0 pb-1" v-if="selected">
+			  <v-slider
+				v-model.number="scrollMultiplierModel"
+				:min="0.1"
+				:max="2"
+				:step="0.1"
+				:thumb-label="false"
+				label="Velocità"
+				density="compact"
+			  />
+			  <div class="text-caption text-medium-emphasis text-center">{{ scrollMultiplierModel.toFixed(1) }}×</div>
+			</v-col>
 		  </v-row>
 		</div>
 
 		<!-- Editor espandibile -->
 <v-expand-transition> <div v-show="panelOpen" class="pa-0">
-  <div
+<div
   v-if="selected && selected.lyrics"
   ref="lyricsPanelEl"
   class="lyrics-viewer mt-2 ma-0 mb-5"
   style="max-height: 300px; overflow-y: auto; font-family: ui-monospace, monospace; font-size: 0.98em; background: #f8f8f8; border-radius: 6px; padding: 8px 12px; white-space: pre-wrap;"
+  @pointerdown="onUserScrollStart"
+  @touchstart.passive="onUserScrollStart"
+  @wheel.passive="onUserScrollStart"
+  @scroll.passive="onUserScrollActivity"
 >
-  {{ selected.lyrics }}
+  <pre class="lyrics-pre">{{ selected.lyrics }}</pre>
 </div>
 </div> </v-expand-transition>
 	  </div>
@@ -292,16 +309,16 @@
       
       <div v-if="selected" class="px-4 pt-2 pb-3">
         <v-slider
-          v-model="scrollSpeedModel"
-          :min="0"
-          :max="300"
-          :step="5"
-          thumb-label="always"
-          label="Velocità scorrimento (px/s)"
+          v-model.number="scrollMultiplierModel"
+          :min="0.1"
+          :max="2"
+          :step="0.1"
+          :thumb-label="false"
+          label="Velocità"
           class="mb-2"
         />
         <div class="text-caption text-medium-emphasis text-center">
-          {{ Math.round(scrollSpeedModel) }} px/s — 0 = disattivato
+          {{ scrollMultiplierModel.toFixed(1) }}×
         </div>
       </div>
       
@@ -310,6 +327,10 @@
           ref="lyricsFullscreenEl" 
           class="lyrics-fullscreen-container"
           style="height: 100%; overflow-y: auto; padding: 16px;"
+          @pointerdown="onUserScrollStart"
+          @touchstart.passive="onUserScrollStart"
+          @wheel.passive="onUserScrollStart"
+          @scroll.passive="onUserScrollActivity"
         >
           <pre 
             class="lyrics-pre" 
@@ -325,7 +346,7 @@
 </template>
 
 <script setup>
-import { ref, reactive, computed, onMounted, onBeforeUnmount, watch } from 'vue'
+import { ref, reactive, computed, onMounted, onBeforeUnmount, watch, nextTick } from 'vue'
 import { Capacitor } from '@capacitor/core'
 import { KeepAwake } from '@capacitor-community/keep-awake'
 import { StatusBar, Style } from '@capacitor/status-bar'
@@ -415,6 +436,9 @@ function selectSong(song) {
   noteValue.value = song.noteValue
   if (selected.value && typeof selected.value.scrollSpeed === 'undefined') {
     selected.value.scrollSpeed = 0          // ← default
+  }
+  if (selected.value && typeof selected.value.scrollMultiplier === 'undefined') {
+    selected.value.scrollMultiplier = 1      // ← default
   }
   if (wasPlaying && audioCtx) {
     current16thNote = 0
@@ -658,7 +682,7 @@ async function onImportFile(ev) {
 // Dialog gestione canzone
 const dialog = ref(false)
 const formRef = ref(null)
-const form = reactive({ title: '', bpm: 100, beats: 4, noteValue: 4, existingSongIds: [], lyrics: '', scrollSpeed: 0 })
+const form = reactive({ title: '', bpm: 100, beats: 4, noteValue: 4, existingSongIds: [], lyrics: '', scrollSpeed: 0, scrollMultiplier: 1 })
 const editTarget = ref(null)
 
 const noteItems = [
@@ -686,12 +710,12 @@ const otherSongsOptions = computed(() => {
 
 function openDialogForNew() {
   editTarget.value = null
-  Object.assign(form, { title: '', bpm: 100, beats: 4, noteValue: 4, existingSongIds: [], lyrics: '', scrollSpeed: 0 })
+  Object.assign(form, { title: '', bpm: 100, beats: 4, noteValue: 4, existingSongIds: [], lyrics: '', scrollSpeed: 0, scrollMultiplier: 1 })
   dialog.value = true
 }
 function openDialogForEdit(song) {
   editTarget.value = song
-  Object.assign(form, { title: song.title, bpm: song.bpm, beats: song.beats, noteValue: song.noteValue, existingSongIds: [], lyrics: song.lyrics || '', scrollSpeed: song.scrollSpeed || 0 })
+  Object.assign(form, { title: song.title, bpm: song.bpm, beats: song.beats, noteValue: song.noteValue, existingSongIds: [], lyrics: song.lyrics || '', scrollSpeed: song.scrollSpeed || 0, scrollMultiplier: typeof song.scrollMultiplier==='number'? song.scrollMultiplier: 1 })
   dialog.value = true
 }
 function saveSong() {
@@ -713,6 +737,7 @@ function saveSong() {
           noteValue: [1,2,4,8,16].includes(+src.noteValue) ? +src.noteValue : 4,
           lyrics: typeof src.lyrics === 'string' ? src.lyrics : '',
           scrollSpeed: typeof src.scrollSpeed === 'number' ? src.scrollSpeed : 0,
+          scrollMultiplier: typeof src.scrollMultiplier === 'number' ? src.scrollMultiplier : 1,
         })
       }
     })
@@ -728,6 +753,7 @@ function saveSong() {
       noteValue: [1,2,4,8,16].includes(+form.noteValue) ? +form.noteValue : 4,
       lyrics: (form.lyrics || '').toString(),
       scrollSpeed: Math.max(0, Number(form.scrollSpeed || 0)),
+      scrollMultiplier: Math.min(2, Math.max(0.1, Number(form.scrollMultiplier || 1))),
     }
     if (editTarget.value) {
       Object.assign(editTarget.value, data)
@@ -742,6 +768,7 @@ function saveSong() {
       beats: clean(form.beats, 1, 12, 4),
       noteValue: [1,2,4,8,16].includes(+form.noteValue) ? +form.noteValue : 4,
       scrollSpeed: Math.max(0, Number(form.scrollSpeed || 0)),
+      scrollMultiplier: Math.min(2, Math.max(0.1, Number(form.scrollMultiplier || 1))),
     }
     if (typeof form.lyrics === 'string') {
       data.lyrics = form.lyrics
@@ -844,6 +871,35 @@ if(idx >= 0 && idx < songs.value.length-1) selectSong(songs.value[idx+1])
 
 let _rafId = null
 let _lastTs = 0
+// Mantiene l'offset di scorrimento (in px) applicato via transform per ciascun elemento
+const _scrollRemainders = new WeakMap()
+// Pausa l'autoscroll quando l'utente interagisce manualmente
+const userAdjustingScroll = ref(false)
+let _userScrollTimer = null
+
+function onUserScrollStart() {
+  userAdjustingScroll.value = true
+  if (_userScrollTimer) clearTimeout(_userScrollTimer)
+  _userScrollTimer = setTimeout(() => { userAdjustingScroll.value = false }, 600)
+  // azzera trasformazioni e residui per evitare micro-scatti durante l'interazione
+  getScrollTargets().forEach(el => {
+    const content = el.querySelector('.lyrics-pre') || el.firstElementChild
+    // consolida solo la parte intera dell'offset virtuale nello scrollTop
+    // e conserva la frazione per riprendere senza scatti visibili
+    const offset = _scrollRemainders.get(el) || 0
+    const maxScroll = Math.max(0, el.scrollHeight - el.clientHeight)
+    const whole = Math.floor(offset)
+    const frac = offset - whole
+    if (whole > 0) {
+      el.scrollTop = Math.min(maxScroll, el.scrollTop + whole)
+    }
+    if (content) content.style.transform = ''
+    _scrollRemainders.set(el, frac)
+  })
+}
+function onUserScrollActivity() {
+  onUserScrollStart()
+}
 
 function getScrollTargets() {
   const els = []
@@ -857,14 +913,33 @@ function _step(ts) {
   const speed = Number(selected.value?.scrollSpeed || 0)
   if (speed <= 0) { stopAutoScroll(); return }
 
+  // Se l'utente sta regolando manualmente la posizione, non forziamo l'autoscroll
+  if (userAdjustingScroll.value) {
+    // mantieni il clock in sync per evitare salti quando riprende
+    _lastTs = ts
+    _rafId = requestAnimationFrame(_step)
+    return
+  }
+
   const dt = _lastTs ? (ts - _lastTs) / 1000 : 0
   _lastTs = ts
 
   const els = getScrollTargets()
   if (els.length) {
     els.forEach(el => {
-      const atBottom = el.scrollTop + el.clientHeight >= el.scrollHeight - 1
-      if (!atBottom) el.scrollTop += speed * dt
+      const distance = Math.max(0, el.scrollHeight - el.clientHeight)
+      let offset = _scrollRemainders.get(el) || 0
+      // avanza offset in base alla velocità effettiva (base * moltiplicatore)
+      const base = Number(selected.value?.scrollSpeed || 0)
+      const mult = Number(selected.value?.scrollMultiplier ?? 1)
+      const effSpeed = Math.max(0, base * mult)
+      offset = Math.min(distance, offset + (effSpeed * dt))
+      _scrollRemainders.set(el, offset)
+      const content = el.querySelector('.lyrics-pre') || el.firstElementChild
+      if (content) {
+        content.style.willChange = 'transform'
+        content.style.transform = `translateY(-${offset}px)`
+      }
     })
   }
 
@@ -874,6 +949,14 @@ function _step(ts) {
 function startAutoScroll() {
   stopAutoScroll()
   _lastTs = 0
+  if (lyricsPanelEl.value) {
+    lyricsPanelEl.value.scrollTop = 0
+    _scrollRemainders.set(lyricsPanelEl.value, 0)
+  }
+  if (lyricsFullscreenEl.value) {
+    lyricsFullscreenEl.value.scrollTop = 0
+    _scrollRemainders.set(lyricsFullscreenEl.value, 0)
+  }
   _rafId = requestAnimationFrame(_step)
 }
 
@@ -881,10 +964,17 @@ function stopAutoScroll() {
   if (_rafId) cancelAnimationFrame(_rafId)
   _rafId = null
   _lastTs = 0
+  // Ripristina eventuali trasformazioni
+  getScrollTargets().forEach(el => {
+    const content = el.querySelector('.lyrics-pre') || el.firstElementChild
+    if (content) content.style.transform = ''
+  })
 }
 
 function resetAutoScroll() {
   getScrollTargets().forEach(el => { el.scrollTop = 0 })
+  if (lyricsPanelEl.value) _scrollRemainders.set(lyricsPanelEl.value, 0)
+  if (lyricsFullscreenEl.value) _scrollRemainders.set(lyricsFullscreenEl.value, 0)
 }
 
 watch([panelOpen, panelFullscreen], async () => {
@@ -921,6 +1011,16 @@ const scrollSpeedModel = computed({
   }
 })
 
+// Moltiplicatore velocità (0.1x–2x) salvato nel brano
+const scrollMultiplierModel = computed({
+  get: () => Number(selected.value?.scrollMultiplier ?? 1),
+  set: (val) => {
+    if (!selected.value) return
+    const m = Math.max(0.1, Math.min(2, Number(val) || 1))
+    selected.value.scrollMultiplier = m
+    saveSharedDebounced()
+  }
+})
 
 
 </script>
@@ -980,6 +1080,13 @@ max-height: 100%;
 font-family: ui-monospace, monospace;
 white-space: pre-wrap;
 margin: 0;
+}
+
+.lyrics-pre {
+  font-family: ui-monospace, monospace;
+  white-space: pre-wrap;
+  margin: 0;
+  will-change: transform;
 }
 
 </style>
