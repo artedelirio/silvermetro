@@ -238,49 +238,59 @@
 		  </div>
 
 		  <v-row class="w-100" align="center" no-gutters>
-			<v-col cols="6" class="d-flex align-center">
+			<v-col cols="6" class="d-flex align-center" style="gap: 12px;">
 			  <v-switch
 				v-model="accentFirst"
 				:disabled="isPlaying"
 				prepend-icon="mdi-music-circle"
 				class="ma-0 pa-0"
 			  />
+			  <v-switch
+				v-model="italianChords"
+				:disabled="!selected"
+				:prepend-icon="italianChords ? 'mdi-translate-variant' : 'mdi-translate-off'"
+				class="ma-0 pa-0"
+			  />
 			</v-col>
 			<v-col cols="6" class="d-flex justify-end align-center" style="gap:4px;">
-			  <v-btn icon variant="text" @click="panelOpen = !panelOpen" :title="panelOpen ? 'Chiudi editor' : 'Apri editor'">
+			  <v-btn icon @click="panelOpen = !panelOpen" :title="panelOpen ? 'Chiudi editor' : 'Apri editor'">
 				<v-icon>{{ panelOpen ? 'mdi-chevron-down' : 'mdi-chevron-up' }}</v-icon>
 			  </v-btn>
-			  <v-btn icon variant="text" @click="panelFullscreen = true" title="Apri a tutto schermo">
+			  <v-btn icon @click="panelFullscreen = true" title="Apri a tutto schermo">
 				<v-icon>mdi-arrow-expand</v-icon>
 			  </v-btn>
 			</v-col>
 			<!-- Indicatore battute -->
-			<v-col cols="12" class="d-flex justify-center align-center">
-			  <div class="d-flex justify-center align-center flex-wrap w-100" style="gap: 12px; min-height: 20px;">
+			<v-col cols="4" class="d-flex justify-center align-center">
+			  <!-- <div class="d-flex justify-center align-center flex-wrap w-100" style="gap: 12px; min-height: 20px;">
 				<div
 				  v-for="n in beats"
 				  :key="n"
 				  class="beat-dot"
 				  :class="{ active: isPlaying && (currentBeat === n - 1), accent: (n === 1) }"
 				/>
-			  </div>
+			  </div> -->
 			</v-col>
-			<!-- Slider velocità nel pannellino -->
-			<v-col cols="12" class="px-4 pt-0 pb-1" v-if="selected">
-        <v-slider
-            v-model.number="scrollMultiplierModel"
-            :min="0.1"
-            :max="2"
-            :step="0.1"
-            :thumb-label="false"
-            label="Velocità"
-            density="compact"
-            @end="saveSharedFlush"
-            @change="saveSharedFlush"
+      </v-row>
+      <v-row class="align-center" no-gutters>
+        <!-- Slider velocità nel pannellino -->
+        <v-col cols="6" v-if="selected" class="d-flex align-center">
+          <v-slider
+        v-model.number="scrollMultiplierModel"
+        :min="0.1"
+        :max="2"
+        :step="0.1"
+        :thumb-label="false"
+        @end="saveSharedFlush"
+        @change="saveSharedFlush"
           />
-			  <div class="text-caption text-medium-emphasis text-center">{{ scrollMultiplierModel.toFixed(1) }}×</div>
-			</v-col>
-		  </v-row>
+        </v-col>
+        <v-col cols="2" class="d-flex align-center justify-end pr-3" v-if="selected">
+          <div class="text-caption text-medium-emphasis">
+        {{ scrollMultiplierModel.toFixed(1) }}×
+          </div>
+        </v-col>
+      </v-row>
 		</div>
 
 		<!-- Editor espandibile -->
@@ -289,13 +299,13 @@
   v-if="selected && selected.lyrics"
   ref="lyricsPanelEl"
   class="lyrics-viewer mt-2 ma-0 mb-5"
-  style="max-height: 300px; overflow-y: auto; font-family: ui-monospace, monospace; font-size: 0.98em; background: #f8f8f8; border-radius: 6px; padding: 8px 12px; white-space: pre-wrap;"
+  style="max-height: 20vh; overflow-y: auto; font-family: ui-monospace, monospace; font-size: 0.98em; background: #f8f8f8; border-radius: 6px; padding: 8px 12px; white-space: pre-wrap;"
   @pointerdown="onUserScrollStart"
   @touchstart.passive="onUserScrollStart"
   @wheel.passive="onUserScrollStart"
   @scroll.passive="onUserScrollActivity"
 >
-  <pre class="lyrics-pre">{{ selected.lyrics }}</pre>
+  <pre class="lyrics-pre">{{ displayLyrics }}</pre>
 </div>
 </div> </v-expand-transition>
 	  </div>
@@ -370,7 +380,7 @@
           <pre 
             class="lyrics-pre" 
             :style="{ minHeight: '100%', fontSize: fullscreenFontScale + 'em' }"
-          >{{ selected?.lyrics || '— Nessun testo —' }}</pre>
+          >{{ displayLyrics || '— Nessun testo —' }}</pre>
         </div>
       </v-card-text>
     </v-card>
@@ -464,6 +474,8 @@ const panelFullscreen = ref(false)
 const metronomeEnabled = ref(true)
 // Fullscreen lyrics font size (per-device)
 const fullscreenFontScale = ref(1)
+// Toggle rendering chords in Italian notation
+const italianChords = ref(false)
 
 // AudioContext e scheduling
 let audioCtx = null
@@ -599,6 +611,11 @@ onMounted(async () => {
       if (!Number.isNaN(n)) fullscreenFontScale.value = Math.min(2, Math.max(0.6, n))
     }
   } catch {}
+  // Preferenza locale: accordi italiani on/off
+  try {
+    const rawIta = localStorage.getItem('silverMetronome:italianChords')
+    if (rawIta !== null) italianChords.value = rawIta === '1' || rawIta === 'true'
+  } catch {}
   // Status bar solo su device
   if (Capacitor.isNativePlatform()) {
     try {
@@ -684,6 +701,46 @@ function increaseFullscreenFont() {
 function decreaseFullscreenFont() {
   fullscreenFontScale.value = Math.max(0.6, +(fullscreenFontScale.value - 0.1).toFixed(2))
 }
+
+// Salva preferenza accordi italiani
+watch(italianChords, (v) => {
+  try { localStorage.setItem('silverMetronome:italianChords', v ? '1' : '0') } catch {}
+})
+
+// --- Chord conversion EN->IT ---
+function convertNoteToItalian(root, acc) {
+  // Normalize accidentals
+  const a = (acc || '').replaceAll('♯', '#').replaceAll('♭', 'b')
+  const key = `${root.toUpperCase()}${a}`
+  const lut = {
+    'C': 'Do', 'C#': 'Do#', 'Db': 'Reb',
+    'D': 'Re', 'D#': 'Re#', 'Eb': 'Mib',
+    'E': 'Mi', 'E#': 'Fa', 'Fb': 'Mi',
+    'F': 'Fa', 'F#': 'Fa#', 'Gb': 'Solb',
+    'G': 'Sol', 'G#': 'Sol#', 'Ab': 'Lab',
+    'A': 'La', 'A#': 'La#', 'Bb': 'Sib',
+    'B': 'Si', 'Cb': 'Si', 'B#': 'Do',
+  }
+  return lut[key] || root + a
+}
+
+function convertChordsToItalian(text) {
+  if (!text) return text
+  // Match chord roots with optional accidental, ensuring we don't eat into words
+  // Preceded by start or a non-chord char; followed by typical chord continuations or separators
+  // Only uppercase A–G as valid chord roots (avoid converting plain 'a')
+  const rootRe = /(^|[^A-Za-z0-9#b♯♭])([A-G])([#b♯♭]?)(?=(?:maj|min|dim|aug|sus|add|m|M|°|\+)?(?:\d{0,2})?(?:\/|[\s\)\]\-,\.;:]|$))/g
+  let converted = text.replace(rootRe, (m, pre, r, a) => pre + convertNoteToItalian(r, a))
+  // Slash-bass parts: /X or /X# or /Xb
+  const slashRe = /(\/)([A-G])([#b♯♭]?)/g
+  converted = converted.replace(slashRe, (m, slash, r, a) => `${slash}${convertNoteToItalian(r, a)}`)
+  return converted
+}
+
+const displayLyrics = computed(() => {
+  const raw = selected.value?.lyrics || ''
+  return italianChords.value ? convertChordsToItalian(raw) : raw
+})
 
 onBeforeUnmount(() => {
   try { KeepAwake.allowSleep() } catch (e) {}
