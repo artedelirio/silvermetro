@@ -1,4 +1,5 @@
 <template>
+
   <v-app :style="appStyle">
     <!-- App Bar con gestione playlist -->
     <v-app-bar density="comfortable">
@@ -182,26 +183,41 @@
         </v-card-actions>
       </v-card>
     </v-dialog>
-	<v-footer app elevation="15" class="fixed-panel">
+	<v-footer app elevation="15" class="fixed-panel pa-1">
 	  <div class="w-100">
 		<!-- Riga compatta -->
 		<div class="d-flex align-center justify-space-between flex-wrap gap-2 px-3 py-2">
 		  <div class="d-flex align-center gap-3 w-100">
-			<v-icon class="mr-1">mdi-timer</v-icon>
+			<v-btn
+			  icon
+			  class="mr-1"
+			  :color="metronomeEnabled ? 'red' : 'grey'"
+			  @click="metronomeEnabled = !metronomeEnabled"
+			  :title="metronomeEnabled ? 'Metronomo attivo' : 'Metronomo disattivato'"
+			>
+			  <v-icon>{{ metronomeEnabled ? 'mdi-timer' : 'mdi-timer-off' }}</v-icon>
+			</v-btn>
 			<div>
-			  <div class="text-subtitle-2" v-if="selected">{{ selected.title }}</div>
+        <div
+          class="text-subtitle-2"
+          v-if="selected"
+          style="max-width: 160px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;"
+          :title="selected.title"
+        >
+          {{ selected.title }}
+        </div>
 			  <div class="text-medium-emphasis">{{ Math.round(currentBpm) }} BPM</div>
 			</div>
 			<v-spacer />
-			<div class="d-flex align-center justify-center" style="min-width:120px; gap:4px;">
-			  <!-- <v-btn
+			<div class="d-flex align-right" style="min-width:120px; gap:4px;">
+			  <v-btn
 				:disabled="!selected || songs.length <= 1 || (selected && songs[0]?.id === selected.id)"
 				icon="mdi-skip-previous"
 				density="default"
 				variant="text"
-				@click="onPrevClick"
+				@click="goPrevSong"
 				title="Brano precedente"
-			  /> -->
+			  />
 			  <v-btn
 				:icon="isPlaying ? 'mdi-stop' : 'mdi-play'"
 				density="default"
@@ -210,14 +226,14 @@
 				class="mx-auto"
 				title="Play/Stop"
 			  />
-			  <!-- <v-btn
+			  <v-btn
 				:disabled="!selected || songs.length <= 1 || (selected && songs[songs.length-1]?.id === selected.id)"
 				icon="mdi-skip-next"
 				density="default"
 				variant="text"
-				@click="onNextClick"
+				@click="goNextSong"
 				title="Brano successivo"
-			  /> -->
+			  />
 			</div>
 		  </div>
 
@@ -251,15 +267,17 @@
 			</v-col>
 			<!-- Slider velocità nel pannellino -->
 			<v-col cols="12" class="px-4 pt-0 pb-1" v-if="selected">
-			  <v-slider
-				v-model.number="scrollMultiplierModel"
-				:min="0.1"
-				:max="2"
-				:step="0.1"
-				:thumb-label="false"
-				label="Velocità"
-				density="compact"
-			  />
+        <v-slider
+            v-model.number="scrollMultiplierModel"
+            :min="0.1"
+            :max="2"
+            :step="0.1"
+            :thumb-label="false"
+            label="Velocità"
+            density="compact"
+            @end="saveSharedFlush"
+            @change="saveSharedFlush"
+          />
 			  <div class="text-caption text-medium-emphasis text-center">{{ scrollMultiplierModel.toFixed(1) }}×</div>
 			</v-col>
 		  </v-row>
@@ -290,6 +308,21 @@
         <v-btn icon="mdi-close" variant="text" @click="panelFullscreen=false"/>
         <v-toolbar-subtitle>{{ selected?.title || 'Nessun brano' }}</v-toolbar-subtitle>
         <v-spacer />
+        <!-- Font size controls for fullscreen lyrics -->
+        <v-btn
+          icon="mdi-format-font-size-decrease"
+          variant="text"
+          :disabled="!selected"
+          @click="decreaseFullscreenFont"
+          title="Testo -"
+        />
+        <v-btn
+          icon="mdi-format-font-size-increase"
+          variant="text"
+          :disabled="!selected"
+          @click="increaseFullscreenFont"
+          title="Testo +"
+        />
         <v-btn
           :disabled="!selected || songs.length <= 1 || (selected && songs[0]?.id === selected.id)"
           icon="mdi-skip-previous"
@@ -316,6 +349,8 @@
           :thumb-label="false"
           label="Velocità"
           class="mb-2"
+          @end="saveSharedFlush"
+          @change="saveSharedFlush"
         />
         <div class="text-caption text-medium-emphasis text-center">
           {{ scrollMultiplierModel.toFixed(1) }}×
@@ -334,13 +369,12 @@
         >
           <pre 
             class="lyrics-pre" 
-            :style="{ minHeight: '100%' }"
+            :style="{ minHeight: '100%', fontSize: fullscreenFontScale + 'em' }"
           >{{ selected?.lyrics || '— Nessun testo —' }}</pre>
         </div>
       </v-card-text>
     </v-card>
   </v-dialog>
-
 
   </v-app>
 </template>
@@ -353,6 +387,7 @@ import { StatusBar, Style } from '@capacitor/status-bar'
 import { initializeApp, getApps } from 'firebase/app'
 import { getFirestore, doc, getDoc, setDoc, onSnapshot, runTransaction, serverTimestamp } from 'firebase/firestore'
 import { getAuth, signInAnonymously, onAuthStateChanged } from 'firebase/auth'
+import Drum from './Drum.vue'
 
 
 const lyricsPanelEl = ref(null)
@@ -402,8 +437,17 @@ const selected = ref(null)
 // Cambi playlist → reset canzone
 watch(selectedPlaylistId, () => {
   const first = songs.value[0] || null
+  const wasPlaying = isPlaying.value
   selected.value = first
   if (first) { bpm.value = first.bpm; beats.value = first.beats; noteValue.value = first.noteValue }
+  // When playlist changes, also reset lyrics scroll
+  nextTick(() => {
+    stopAutoScroll()
+    resetAutoScroll()
+    if (wasPlaying && Number(selected.value?.scrollSpeed || 0) > 0) {
+      startAutoScroll()
+    }
+  })
   saveSharedDebounced()
 })
 
@@ -417,6 +461,9 @@ const currentBeat = ref(0) // 0-based
 const currentBpm = ref(bpm.value)
 const panelOpen = ref(false)
 const panelFullscreen = ref(false)
+const metronomeEnabled = ref(true)
+// Fullscreen lyrics font size (per-device)
+const fullscreenFontScale = ref(1)
 
 // AudioContext e scheduling
 let audioCtx = null
@@ -445,6 +492,14 @@ function selectSong(song) {
     currentBeat.value = 0
     nextNoteTime = audioCtx.currentTime + 0.1
   }
+  // Reset scrolling lyrics on song change
+  nextTick(() => {
+    stopAutoScroll()
+    resetAutoScroll()
+    if (wasPlaying && getEffectiveScrollSpeed() > 0) {
+      startAutoScroll()
+    }
+  })
 }
 
 
@@ -465,6 +520,7 @@ function moveDown(i){ if (i>=songs.value.length-1) return; const arr=songs.value
 
 // Riproduzione click
 function playClick(accent = false, when = 0) {
+  if (!metronomeEnabled.value) return
   const osc = audioCtx.createOscillator()
   const gain = audioCtx.createGain()
   osc.frequency.value = accent ? 1900 : 1200
@@ -508,7 +564,7 @@ function start() {
     audioCtx.resume()
   }
   isPlaying.value = true
-  if ((selected.value?.scrollSpeed || 0) > 0) startAutoScroll()
+  if (getEffectiveScrollSpeed() > 0) startAutoScroll()
   current16thNote = 0
   currentBeat.value = 0
   nextNoteTime = audioCtx.currentTime + 0.1
@@ -530,6 +586,19 @@ let bpmMonitor = null
 
 // --- FIREBASE AUTH + SYNC ---
 onMounted(async () => {
+  // Preferenza locale: metronomo on/off
+  try {
+    const raw = localStorage.getItem('silverMetronome:metronomeEnabled')
+    if (raw !== null) metronomeEnabled.value = raw === '1' || raw === 'true'
+  } catch {}
+  // Preferenza locale: fullscreen font scale
+  try {
+    const rawFs = localStorage.getItem('silverMetronome:fullscreenFontScale')
+    if (rawFs !== null) {
+      const n = Number(rawFs)
+      if (!Number.isNaN(n)) fullscreenFontScale.value = Math.min(2, Math.max(0.6, n))
+    }
+  } catch {}
   // Status bar solo su device
   if (Capacitor.isNativePlatform()) {
     try {
@@ -599,6 +668,23 @@ onMounted(async () => {
   }
 })
 
+// Salva preferenza metronomo in localStorage (per-device)
+watch(metronomeEnabled, (v) => {
+  try { localStorage.setItem('silverMetronome:metronomeEnabled', v ? '1' : '0') } catch {}
+})
+
+// Salva preferenza dimensione testo fullscreen
+watch(fullscreenFontScale, (v) => {
+  try { localStorage.setItem('silverMetronome:fullscreenFontScale', String(v)) } catch {}
+})
+
+function increaseFullscreenFont() {
+  fullscreenFontScale.value = Math.min(2, +(fullscreenFontScale.value + 0.1).toFixed(2))
+}
+function decreaseFullscreenFont() {
+  fullscreenFontScale.value = Math.max(0.6, +(fullscreenFontScale.value - 0.1).toFixed(2))
+}
+
 onBeforeUnmount(() => {
   try { KeepAwake.allowSleep() } catch (e) {}
   if (schedulerTimer) clearInterval(schedulerTimer)
@@ -612,6 +698,13 @@ function saveSharedDebounced() {
   clearTimeout(_tCloud)
   cloudSynced.value = false
   _tCloud = setTimeout(() => { saveSharedNow().catch(() => {}) }, 700)
+}
+
+function saveSharedFlush() {
+  clearTimeout(_tCloud)
+  cloudSynced.value = false
+  // Piccolo nextTick per assicurare l'ultimo v-model sia commitato
+  nextTick(() => { saveSharedNow().catch(() => {}) })
 }
 
 async function saveSharedNow() {
@@ -877,6 +970,18 @@ const _scrollRemainders = new WeakMap()
 const userAdjustingScroll = ref(false)
 let _userScrollTimer = null
 
+// Base di fallback se il brano non ha ancora uno scrollSpeed definito su Firestore
+const DEFAULT_SCROLL_SPEED = 40 // px/sec
+
+function getEffectiveScrollSpeed() {
+  if (!selected.value) return 0
+  const base = Number(selected.value.scrollSpeed || 0)
+  if (base > 0) return base
+  // fallback: se ci sono lyrics, usa una velocità predefinita per far partire lo scroll
+  const hasLyrics = typeof selected.value.lyrics === 'string' && selected.value.lyrics.trim().length > 0
+  return hasLyrics ? DEFAULT_SCROLL_SPEED : 0
+}
+
 function onUserScrollStart() {
   userAdjustingScroll.value = true
   if (_userScrollTimer) clearTimeout(_userScrollTimer)
@@ -910,7 +1015,7 @@ function getScrollTargets() {
 
 function _step(ts) {
   if (!isPlaying.value) { stopAutoScroll(); return }
-  const speed = Number(selected.value?.scrollSpeed || 0)
+  const speed = getEffectiveScrollSpeed()
   if (speed <= 0) { stopAutoScroll(); return }
 
   // Se l'utente sta regolando manualmente la posizione, non forziamo l'autoscroll
@@ -930,7 +1035,7 @@ function _step(ts) {
       const distance = Math.max(0, el.scrollHeight - el.clientHeight)
       let offset = _scrollRemainders.get(el) || 0
       // avanza offset in base alla velocità effettiva (base * moltiplicatore)
-      const base = Number(selected.value?.scrollSpeed || 0)
+      const base = getEffectiveScrollSpeed()
       const mult = Number(selected.value?.scrollMultiplier ?? 1)
       const effSpeed = Math.max(0, base * mult)
       offset = Math.min(distance, offset + (effSpeed * dt))
@@ -972,7 +1077,9 @@ function stopAutoScroll() {
 }
 
 function resetAutoScroll() {
-  getScrollTargets().forEach(el => { el.scrollTop = 0 })
+  // Reset scroll position for both containers when present
+  if (lyricsPanelEl.value) lyricsPanelEl.value.scrollTop = 0
+  if (lyricsFullscreenEl.value) lyricsFullscreenEl.value.scrollTop = 0
   if (lyricsPanelEl.value) _scrollRemainders.set(lyricsPanelEl.value, 0)
   if (lyricsFullscreenEl.value) _scrollRemainders.set(lyricsFullscreenEl.value, 0)
 }
@@ -980,13 +1087,13 @@ function resetAutoScroll() {
 watch([panelOpen, panelFullscreen], async () => {
   if (!isPlaying.value) return
   await nextTick() // aspetta che i container (panel/fullscreen) siano montati
-  if ((selected.value?.scrollSpeed || 0) > 0) startAutoScroll()
+  if (getEffectiveScrollSpeed() > 0) startAutoScroll()
 })
 
 watch(isPlaying, (val) => {
   if (val) {
     resetAutoScroll()
-    if ((selected.value?.scrollSpeed || 0) > 0) startAutoScroll()
+    if (getEffectiveScrollSpeed() > 0) startAutoScroll()
   } else {
     stopAutoScroll()
   }
