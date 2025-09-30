@@ -271,7 +271,7 @@
 				/>
 			  </div> -->
 			</v-col>
-      </v-row>
+      </v-row>  
       <v-row class="align-center" no-gutters>
         <!-- Slider velocità nel pannellino -->
         <v-col cols="6" v-if="selected" class="d-flex align-center">
